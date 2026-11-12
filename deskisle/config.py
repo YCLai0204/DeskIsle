@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from . import APP_NAME
+from .engine.photo import MODES as IMAGE_MODES
 from .engine.themes import DEFAULT_THEME, get_theme
 
 
@@ -31,6 +32,8 @@ class Config:
     reseed_on_move: bool = True   # 跟隨時,圖示排列一改變就換一個種子(每次的海岸線都不同)
     screens: Tuple[str, ...] = ()  # 要更新桌布的螢幕代碼;空 = 全部螢幕
     appearance: str = "system"     # 介面配色:system(跟隨系統)/ light / dark
+    image: str = ""                # 使用者的圖片(匯入到 app_dir()/images 的那一份)
+    image_mode: str = "off"        # 圖片的用法:off / land(當陸地)/ water(當海)/ colors(取色)
 
     def validate(self) -> "Config":
         get_theme(self.theme)
@@ -42,6 +45,8 @@ class Config:
             raise ValueError("poll_interval 與 idle_interval 不可小於 0.1 秒")
         if not isinstance(self.screens, tuple) or not all(isinstance(i, str) for i in self.screens):
             raise ValueError("screens 必須是螢幕代碼(文字)的清單")
+        if self.image_mode not in IMAGE_MODES:
+            raise ValueError(f"image_mode 必須是 {'、'.join(IMAGE_MODES)} 其中之一")
         if self.appearance not in APPEARANCES:
             raise ValueError(f"appearance 必須是 {'、'.join(APPEARANCES)} 其中之一")
         return self

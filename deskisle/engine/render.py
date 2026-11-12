@@ -1,7 +1,7 @@
 """把地形畫成圖片。只用 numpy 與 Pillow,不碰任何 Windows API。"""
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -51,12 +51,14 @@ def _add_sparkles(rgb: np.ndarray, s: np.ndarray, theme: Theme, seed: int, scale
 def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
            margin: float = 46.0, blend: float = 26.0, roughness: float = 22.0,
            seed: int = 7, scale: float = 1.0, decorations: float = 1.0,
-           debug: bool = False) -> Image.Image:
+           debug: bool = False, photo: Optional[np.ndarray] = None, photo_mode: str = "") -> Image.Image:
     """畫出一張 width×height 的 RGB 圖片。
 
     rects 是圖示矩形(圖片座標);scale 是縮放比例,像素類參數都會乘上它
     (畫縮小的預覽圖時,把矩形與 scale 一起縮小即可)。
     decorations 是裝飾物密度(0 = 不畫)。debug=True 會畫出圖示外框。
+    photo 是使用者的圖片(已經裁成 height×width×3,見 photo.cover);
+    photo_mode = "land" 時鋪在陸地上,"water" 時鋪在海上。
     """
     sd = shore_field(
         width, height, rects,
@@ -107,6 +109,22 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
             rgb += cloud[..., None] * np.array(color, dtype=np.float32)
             del cloud
 
+    # ---- 使用者的圖片 ------------------------------------------------------
+    # 在浪花之前合成:海岸線上的沙灘、淺灘與浪花仍然是主題的,島的輪廓才看得清楚
+    rules = theme.decor
+    if photo is not None and photo_mode in ("land", "water"):
+        if photo_mode == "land":
+            weight = smoothstep(-7.0, -16.0, s)          # 海岸留一圈主題的沙灘
+            rim = smoothstep(-48.0, -10.0, s)            # 靠近海岸稍微壓暗,島的邊緣才有立體感
+            rules = tuple(r for r in rules if r.lo >= -16)   # 不在圖片上放樹、花
+        else:
+            weight = smoothstep(12.0, 34.0, s)           # 海岸邊留一圈主題的淺灘
+            rim = 1.0 - smoothstep(12.0, 90.0, s)
+            rules = tuple(r for r in rules if r.hi <= 34)    # 不在圖片上放船、魚、星球
+        picture = photo * (1.0 - 0.24 * rim)[..., None]
+        rgb += (picture - rgb) * weight[..., None]
+        del weight, rim, picture
+
     # ---- 浪花 --------------------------------------------------------------
     lam = theme.wave_length
     edge = smoothstep(-1.0, 0.8, s) * (1.0 - smoothstep(2.5, 8.0, s)) * theme.shore_foam
@@ -136,8 +154,8 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
     image = Image.fromarray(rgb.astype(np.uint8), "RGB")
     del rgb
 
-    if decorations > 0 and theme.decor:
-        placements = decor.place(s, rects, theme.decor, seed=seed, density=decorations, scale=scale)
+    if decorations > 0 and rules:
+        placements = decor.place(s, rects, rules, seed=seed, density=decorations, scale=scale)
         decor.draw(image, placements, scale)
 
     if debug:

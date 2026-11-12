@@ -169,6 +169,31 @@ class GuiTests(unittest.TestCase):
         button.invoke()
         self.assertEqual(clicks, [1])
 
+    def test_choosing_a_mode_without_a_picture_asks_for_one(self):
+        from deskisle.ui import app as gui
+        app, _ = self._make_app()
+        with mock.patch.object(gui.filedialog, "askopenfilename", return_value="") as ask:
+            app.var_image_mode.set("water")
+            app._image_mode_changed()
+        ask.assert_called_once()
+        self.assertEqual(app.var_image_mode.get(), "off")        # 取消 → 維持不使用
+
+    def test_choosing_a_picture_copies_it_and_uses_it_as_land(self):
+        from deskisle.ui import app as gui
+        app, _ = self._make_app()
+        source = Path(self.tmp.name) / "我的照片.png"
+        Image.new("RGB", (64, 40), (200, 60, 30)).save(source)
+        with mock.patch.object(gui.filedialog, "askopenfilename", return_value=str(source)):
+            app._choose_image()
+        draft = app.draft_config()
+        self.assertEqual(draft.image_mode, "land")
+        self.assertEqual(Path(draft.image).parent.name, "images")
+        self.assertTrue(Path(draft.image).exists())
+        self.assertEqual(app.image_caption.cget("text"), "64 × 40")
+        self.assertEqual(app.pending_pill.text, "尚未套用")
+        app._remove_image()
+        self.assertEqual((app.draft_config().image, app.draft_config().image_mode), ("", "off"))
+
     def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
         app, root = self._make_app()
         app._on_reseed(4321)

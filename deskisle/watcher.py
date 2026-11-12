@@ -19,13 +19,21 @@ from PIL import Image
 
 from . import system
 from .config import Config
-from .engine import decor
+from .engine import decor, photo
 from .engine.layout import DesktopLayout, IconDetectionError, screen_rects
 from .system import read_layout, wallpaper
 from .engine.render import render
-from .engine.themes import get_theme
+from .engine.themes import Theme, get_theme
 
 GAP_COLOR = (0, 0, 0)   # 多螢幕合成圖中,沒有螢幕的空隙
+
+
+def resolve_theme(config: Config) -> Theme:
+    """實際要用的主題:選「從圖片取色」時,是用圖片顏色重新上色過的版本。"""
+    theme = get_theme(config.theme)
+    if config.image_mode == "colors":
+        theme = photo.recolored(theme, config.image)
+    return theme
 
 
 def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: float = 1.0,
@@ -38,11 +46,17 @@ def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: floa
     screen = layout.screen_list()[index]
     width = max(1, int(round(screen.width * ratio)))
     height = max(1, int(round(screen.height * ratio)))
+    layer = None
+    if config.image_mode in ("land", "water"):
+        picture = photo.load(config.image)
+        if picture is not None:          # 圖片不見了就照一般主題畫
+            layer = photo.cover(picture, width, height)   # 每個螢幕各自裁切
     return render(
-        width, height, screen_rects(layout, screen, ratio), get_theme(config.theme),
+        width, height, screen_rects(layout, screen, ratio), resolve_theme(config),
         margin=config.margin, blend=config.blend, roughness=config.roughness,
         seed=config.seed + 1013 * index, scale=system.ui_scale() * ratio,
         decorations=config.decorations, debug=debug,
+        photo=layer, photo_mode=config.image_mode if layer is not None else "",
     )
 
 
@@ -84,7 +98,7 @@ def new_seed(old: int) -> int:
 def look_key(config: Config) -> tuple:
     """設定中會影響畫面的部分;這些一變就要重畫。"""
     return (config.theme, config.seed, config.margin, config.blend, config.roughness,
-            config.decorations, config.screens)
+            config.decorations, config.screens, config.image, config.image_mode)
 
 
 class LayoutDebouncer:
@@ -243,6 +257,7 @@ class Watcher:
                 return slow, 0
             finally:
                 decor.clear_cache()
+                photo.clear_cache()
                 system.trim_memory()
             debouncer.mark_applied(signature)
             self._last_layout = layout_key

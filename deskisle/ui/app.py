@@ -27,11 +27,12 @@ import time
 import tkinter as tk
 import traceback
 from dataclasses import replace
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 from typing import Dict, List, Optional, Tuple
 
 from .. import APP_NAME, __version__, is_frozen, system
 from ..config import Config, app_dir, load_config, save_config
+from ..engine import photo
 from ..engine.layout import DesktopLayout, Screen
 from ..engine.themes import THEMES, get_theme
 from ..system import autostart, read_layout, wallpaper
@@ -43,7 +44,14 @@ from .widgets import (Button, Card, Divider, Kit, NavItem, Pill, ScreenTile, Scr
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
-LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations")
+LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations", "image_mode")
+IMAGE_MODE_OPTIONS = (("off", "不使用"), ("land", "當陸地"), ("water", "當海"), ("colors", "取色"))
+IMAGE_MODE_HINTS = {
+    "off": "選好圖片後,可以把它當成島嶼的陸地、當成海,或只拿它的顏色。",
+    "land": "圖示周圍的島嶼會鋪上你的圖片,島外是「{theme}」主題的海。",
+    "water": "你的圖片鋪滿整個背景當成海,圖示底下長出「{theme}」主題的小島。",
+    "colors": "用圖片裡的顏色重新上色「{theme}」主題;質感、浪花與裝飾物照舊。",
+}
 STATE_TEXT = {"following": "跟隨中", "paused": "暫停中", "error": "發生問題", "stopped": "未啟動"}
 
 # 版面尺寸(以 100% 縮放為準)
@@ -164,6 +172,7 @@ class App:
         self.var_autostart, self.var_reseed = tk.BooleanVar(), tk.BooleanVar()
         self.var_poll, self.var_idle, self.var_debounce = tk.DoubleVar(), tk.DoubleVar(), tk.DoubleVar()
         self.var_appearance = tk.StringVar(value=self.applied.appearance)
+        self.var_image, self.var_image_mode = tk.StringVar(), tk.StringVar(value="off")
 
         self._build_sidebar()
 
@@ -430,6 +439,8 @@ class App:
         self.theme_hint = label(body, kit, font="caption", color=p.muted, wrap=TEXT_WRAP - 20)
         self.theme_hint.pack(fill="x", padx=px(4), pady=(px(6), 0))
 
+        self._build_image_section(page)
+
         self.section(page, "海岸線")
         body = self.card(page)
         _line, slot = self.row(body, "形狀編號", "同一個編號會畫出同樣的海岸線")
@@ -457,6 +468,95 @@ class App:
 
         Button(page, kit, "恢復預設外觀", self._reset_look, icon="restore", small=True).pack(
             anchor="w", pady=(px(18), px(6)))
+
+    def _build_image_section(self, page: tk.Frame) -> None:
+        """「自訂圖片」:縮圖、選擇/移除、用法(當陸地/當海/取色)。"""
+        kit = self.kit
+        p, px = kit.p, kit.px
+        self.section(page, "自訂圖片")
+        body = self.card(page)
+        line = tk.Frame(body, background=p.card)
+        line.pack(fill="x", padx=px(14), pady=px(12))
+        self._image_thumb_size = (px(104), px(66))
+        self.image_thumb = tk.Canvas(line, width=self._image_thumb_size[0], height=self._image_thumb_size[1],
+                                     background=p.card, highlightthickness=0, borderwidth=0)
+        self.image_thumb.grid(row=0, column=0, rowspan=3, sticky="w")
+        self._image_thumb_key = None
+        label(line, kit, "你的圖片").grid(row=0, column=1, sticky="w", padx=(px(14), 0))
+        self.image_caption = label(line, kit, font="caption", color=p.muted)
+        self.image_caption.grid(row=1, column=1, sticky="w", padx=(px(14), 0), pady=(px(2), 0))
+        buttons = tk.Frame(line, background=p.card)
+        buttons.grid(row=2, column=1, sticky="w", padx=(px(14), 0), pady=(px(8), 0))
+        Button(buttons, kit, "選擇圖片…", self._choose_image, icon="look", small=True).pack(side="left")
+        self.image_remove = Button(buttons, kit, "移除", self._remove_image, kind="danger", small=True)
+        self.image_remove.pack(side="left", padx=(px(6), 0))
+
+        control = self.segmented_row(body, "用法", "", IMAGE_MODE_OPTIONS, self.var_image_mode,
+                                     self._image_mode_changed)
+        self.image_mode_hint = label(control.master, kit, font="caption", color=p.muted, wrap=TEXT_WRAP - 30)
+        self.image_mode_hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(px(8), 0))
+
+    def _refresh_image_card(self) -> None:
+        kit = self.kit
+        p = kit.p
+        path, mode = self.var_image.get(), self.var_image_mode.get()
+        picture = photo.load(path)
+        width, height = self._image_thumb_size
+        key = (path, picture is not None)
+        if key != self._image_thumb_key:
+            self._image_thumb_key = key
+            canvas = self.image_thumb
+            canvas.delete("all")
+            if picture is not None:
+                self._image_thumb_photo = to_photo(style.rounded(photo.thumbnail(picture, width, height), kit.px(8)),
+                                                   self.root)
+                canvas.create_image(0, 0, anchor="nw", image=self._image_thumb_photo)
+            else:
+                kit.draw_box(canvas, 0, 0, width, height, kit.px(8), p.field, p.border)
+                canvas.create_image(width / 2, height / 2, image=kit.icon("look", kit.px(22), p.subtle))
+        if picture is not None:
+            caption = f"{picture.width} × {picture.height}"
+        elif path:
+            caption = "找不到圖片檔案,請重新選擇"
+        else:
+            caption = "還沒有選擇圖片"
+        self.image_caption.configure(text=caption)
+        self.image_remove.set_enabled(bool(path))
+        theme = get_theme(self._theme_key()).label
+        self.image_mode_hint.configure(text=IMAGE_MODE_HINTS.get(mode, "").format(theme=theme))
+
+    def _choose_image(self) -> bool:
+        """請使用者挑一張圖片,複製一份到程式的資料夾。挑好回傳 True。"""
+        path = filedialog.askopenfilename(
+            parent=self.root, title="選擇圖片",
+            filetypes=[("圖片", " ".join(photo.IMAGE_TYPES)), ("所有檔案", "*.*")])
+        if not path:
+            return False
+        self.root.configure(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            target = photo.import_image(path, app_dir() / "images")
+        except (ValueError, OSError) as exc:
+            messagebox.showerror(APP_NAME, str(exc), parent=self.root)
+            return False
+        finally:
+            self.root.configure(cursor="")
+        self.var_image.set(str(target))
+        if self.var_image_mode.get() == "off":
+            self.var_image_mode.set("land")      # 選了圖片通常就是要用它
+        self._look_changed()
+        return True
+
+    def _image_mode_changed(self) -> None:
+        if self.var_image_mode.get() != "off" and photo.load(self.var_image.get()) is None:
+            if not self._choose_image():
+                self.var_image_mode.set("off")   # 沒選圖片就維持「不使用」
+        self._look_changed()
+
+    def _remove_image(self) -> None:
+        self.var_image.set("")
+        self.var_image_mode.set("off")
+        self._look_changed()
 
     def _choose_theme(self, key: str) -> None:
         for name, value in self._theme_names.items():
@@ -600,6 +700,8 @@ class App:
         self.var_idle.set(config.idle_interval)
         self.var_debounce.set(config.debounce)
         self.var_appearance.set(config.appearance)
+        self.var_image.set(config.image)
+        self.var_image_mode.set(config.image_mode)
         self._set_header_state("following" if config.follow else "stopped",
                                "" if config.follow else "未開啟")
         try:
@@ -611,6 +713,7 @@ class App:
     def _refresh_labels(self) -> None:
         self.theme_hint.configure(text=get_theme(self._theme_key()).description)
         self._refresh_theme_tiles()
+        self._refresh_image_card()
 
     def _theme_key(self) -> str:
         return self._theme_names.get(self.var_theme.get(), self.applied.theme)
@@ -638,6 +741,8 @@ class App:
             reseed_on_move=bool(self.var_reseed.get()),
             screens=self._screen_choice,
             appearance=self.var_appearance.get(),
+            image=self.var_image.get(),
+            image_mode=self.var_image_mode.get(),
         ).validate()
 
     def _save(self) -> None:
@@ -847,6 +952,8 @@ class App:
                 info += f" · {screens[0].width} × {screens[0].height}"
             if not layout.icons_visible:
                 info += " · 桌面圖示目前是隱藏的"
+            if config.image_mode != "off" and photo.load(config.image) is None:
+                info += " · 找不到自訂圖片,先用一般主題"
             self._ui(self._preview_done, buffer.getvalue(), "", None if override else layout.screens, info)
         except Exception as exc:
             self._ui(self._preview_done, None, str(exc))
@@ -944,6 +1051,7 @@ class App:
         """關閉視窗 = 縮到系統匣(沒有系統匣時縮到工作列),監看照常進行。"""
         if self.headless:
             return
+        photo.clear_cache()      # 縮起來後用不到預覽,圖片不必留在記憶體
         if self.tray:
             self.root.withdraw()
             if first_time and not getattr(self, "_told_about_tray", False):
