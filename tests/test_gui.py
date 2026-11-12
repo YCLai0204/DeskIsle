@@ -212,6 +212,41 @@ class GuiTests(unittest.TestCase):
         self.assertIn("現在是晚上,桌布使用「宇宙」", app.night_hint.cget("text"))
         self.assertIn("自動跟隨", app.night_hint.cget("text"))
 
+    def test_export_saves_the_previewed_look_at_full_size(self):
+        import time
+        from deskisle.ui import app as gui
+        app, root = self._make_app()
+        app.layout_override = DesktopLayout(400, 300, (DesktopIcon("a", 10, 10, 86, 80),))
+        app.var_theme.set("宇宙(cosmos)")                    # 還沒套用也照預覽的樣子匯出
+        target = Path(self.tmp.name) / "匯出.png"
+        with mock.patch.object(gui.filedialog, "asksaveasfilename", return_value=str(target)) as ask:
+            app.export_png()
+        self.assertEqual(ask.call_args.kwargs["initialfile"], f"DeskIsle_cosmos_{Config().seed}.png")
+        self.assertFalse(app.export_button.enabled)
+        # 背景工作用 root.after 通知介面,必須在 mainloop 裡等(真正的程式也是)
+        deadline = time.monotonic() + 20
+
+        def check():
+            if app.export_button.enabled or time.monotonic() > deadline:
+                root.quit()
+            else:
+                root.after(20, check)
+
+        root.after(20, check)
+        root.mainloop()
+        self.assertTrue(app.export_button.enabled)
+        self.assertIn("已匯出", app.status_var.get())
+        with Image.open(target) as exported:
+            self.assertEqual(exported.size, (400, 300))
+        self.assertEqual(app.applied.theme, "beach")              # 匯出不會套用
+
+    def test_export_can_be_cancelled(self):
+        from deskisle.ui import app as gui
+        app, _ = self._make_app()
+        with mock.patch.object(gui.filedialog, "asksaveasfilename", return_value=""):
+            app.export_png()
+        self.assertTrue(app.export_button.enabled)
+
     def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
         app, root = self._make_app()
         app._on_reseed(4321)

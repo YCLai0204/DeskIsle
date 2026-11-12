@@ -37,7 +37,8 @@ from ..engine.layout import DesktopLayout, Screen
 from ..engine.themes import DECOR_LABELS, THEMES, get_theme
 from ..filetypes import KIND_LABELS
 from ..system import autostart, read_layout, wallpaper
-from ..watcher import Watcher, WatchStatus, apply_layout, current_hour, effective_config, is_night, look_key
+from ..watcher import (Watcher, WatchStatus, apply_layout, current_hour, effective_config, is_night, look_key,
+                       render_layout)
 from . import style, tray
 from .preview import fit_width, render_preview, render_preview_image
 from .widgets import (Button, Card, Divider, Dropdown, Kit, NavItem, Pill, ScreenTile, ScrollArea, Segmented,
@@ -48,7 +49,7 @@ SHOW_SIGNAL = "DeskIsle.Show"
 LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations", "image_mode", "file_decor")
 IMAGE_MODE_OPTIONS = (("off", "不使用"), ("land", "當陸地"), ("water", "當海"), ("colors", "取色"))
 IMAGE_MODE_HINTS = {
-    "off": "選好圖片後,可以把它當成島嶼的陸地、當成海,或只拿它的顏色。",
+    "off": "選好圖片後,可以當成島嶼的陸地、當成海,或只拿它的顏色。",
     "land": "圖示周圍的島嶼會鋪上你的圖片,島外是「{theme}」主題的海。",
     "water": "你的圖片鋪滿整個背景當成海,圖示底下長出「{theme}」主題的小島。",
     "colors": "用圖片裡的顏色重新上色「{theme}」主題;質感、浪花與裝飾物照舊。",
@@ -227,7 +228,7 @@ class App:
         width = min(want_w, int(root.winfo_screenwidth() * 0.94))
         height = min(want_h, int(root.winfo_screenheight() * 0.86))
         root.geometry(f"{width}x{height}")
-        root.minsize(min(width, px(SIDEBAR_WIDTH + SETTINGS_WIDTH + 400)), min(height, px(560)))
+        root.minsize(min(width, px(SIDEBAR_WIDTH + SETTINGS_WIDTH + 520)), min(height, px(560)))
 
     def _rebuild_ui(self) -> None:
         """換配色:記下畫面上的設定與目前的頁面,整個視窗重建後再放回去。"""
@@ -322,6 +323,8 @@ class App:
         self.apply_button = Button(buttons, kit, "套用到桌布", self.apply_now, kind="primary", icon="brush")
         self.apply_button.pack(side="left")
         Button(buttons, kit, "還原原本桌布", self.restore_wallpaper, icon="restore").pack(side="left", padx=(px(10), 0))
+        self.export_button = Button(buttons, kit, "匯出 PNG", self.export_png, kind="ghost", icon="download")
+        self.export_button.pack(side="right")
 
         # 狀態訊息固定佔兩行,訊息長短不同時版面才不會跳動
         self.status_var = tk.StringVar(value="")
@@ -913,15 +916,46 @@ class App:
             except Exception as exc:
                 log_error(traceback.format_exc())
                 message = f"套用失敗:{exc}"
-            finally:
-                system.trim_memory()
             self._ui(self._apply_finished, message)
 
         threading.Thread(target=work, name="deskisle-apply", daemon=True).start()
 
     def _apply_finished(self, message: str) -> None:
+        # 在介面執行緒釋放記憶體:gc 可能回收 tkinter 的物件,不能在背景執行緒做
+        system.trim_memory()
         self._busy_applying = False
         self.apply_button.set_enabled(True)
+        self.set_status(message)
+
+    def export_png(self) -> None:
+        """把預覽中的樣子畫成全尺寸(整個桌面)存成 PNG,不會動到桌布。"""
+        config = self.draft_config()
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="匯出桌布", defaultextension=".png", filetypes=[("PNG 圖片", "*.png")],
+            initialfile=f"DeskIsle_{config.theme}_{config.seed}.png")
+        if not path:
+            return
+        self.export_button.set_enabled(False)
+        self.set_status("正在匯出全尺寸桌布…")
+        override = self.layout_override
+
+        def work():
+            system.lower_thread_priority()
+            try:
+                layout = override or read_layout(names=config.file_decor)
+                image = render_layout(layout, config)
+                image.save(path, "PNG")
+                message = f"已匯出 {path}({image.width} × {image.height})"
+            except Exception as exc:
+                log_error(traceback.format_exc())
+                message = f"匯出失敗:{exc}"
+            self._ui(self._export_finished, message)
+
+        threading.Thread(target=work, name="deskisle-export", daemon=True).start()
+
+    def _export_finished(self, message: str) -> None:
+        system.trim_memory()        # 同 _apply_finished:在介面執行緒做
+        self.export_button.set_enabled(True)
         self.set_status(message)
 
     def restore_wallpaper(self) -> None:
