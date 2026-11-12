@@ -1,8 +1,9 @@
 """依作業系統選擇實作:其他模組只透過這裡呼叫系統功能。
 
     Windows → winapi.py、icons.py、screens.py、wallpaper.py、autostart.py
+    macOS   → macos.py、wallpaper_mac.py、autostart_mac.py
 
-對外提供的東西(之後支援其他作業系統時,實作同樣的名稱即可):
+對外提供的東西兩邊都一樣:
 
     read_layout(names)            讀取桌面圖示排列 → DesktopLayout
     list_screens()                目前的螢幕清單
@@ -22,7 +23,7 @@ import sys
 
 from .layout import IconDetectionError, Screen  # noqa: F401
 
-SUPPORTED = sys.platform == "win32"
+SUPPORTED = sys.platform in ("win32", "darwin")
 
 if sys.platform == "win32":
     from . import autostart, wallpaper  # noqa: F401
@@ -38,5 +39,14 @@ if sys.platform == "win32":
         vx, vy, _width, _height = virtual_screen()
         return _screens.list_screens(vx, vy)
 
+elif sys.platform == "darwin":
+    from . import autostart_mac as autostart  # noqa: F401
+    from . import wallpaper_mac as wallpaper  # noqa: F401
+    from .macos import (  # noqa: F401
+        acquire_single_instance, create_signal, desktop_is_foreground, enable_dpi_awareness,
+        list_screens, lower_thread_priority, monitor_count, read_layout, send_signal, trim_memory,
+        ui_scale, user_is_busy, virtual_screen, wait_signal,
+    )
+
 else:  # pragma: no cover
-    raise ImportError("DeskIsle 目前只支援 Windows")
+    raise ImportError("DeskIsle 只支援 Windows 與 macOS")

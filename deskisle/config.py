@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import List, Tuple
@@ -41,7 +42,12 @@ class Config:
 
 
 def app_dir() -> Path:
-    """存放設定、狀態與產生的桌布的資料夾。"""
+    """存放設定、狀態與產生的桌布的資料夾。
+
+    Windows:%LOCALAPPDATA%\\DeskIsle;macOS:~/Library/Application Support/DeskIsle
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     return Path(base) / APP_NAME
 

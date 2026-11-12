@@ -57,6 +57,30 @@ exe 沒有簽章,在別台電腦第一次執行時 Windows 可能會跳出 Smart
 如果原本用的是「Windows 焦點」或「幻燈片」:圖片會還原,但「自動更換」這個功能
 需要到 設定 → 個人化 → 背景 重新選一次。
 
+## macOS(實驗性)
+
+DeskIsle 也可以在 macOS 上執行,但**還沒有在真的 Mac 上測試過**(開發環境是 Windows),
+歡迎回報問題。
+
+```
+python3 -m pip install -r requirements.txt
+python3 deskisle_app.py
+```
+
+- 需要 Python 3.9 以上,而且要有 tkinter(python.org 的安裝程式內建;
+  Homebrew 的 Python 要另外 `brew install python-tk`)。
+- 第一次執行時 macOS 會問「是否允許控制 Finder」,要按「好」——DeskIsle 要靠 Finder
+  才能知道桌面圖示的位置。按錯了可以到「系統設定 → 隱私權與安全性 → 自動化」打開。
+- 與 Windows 版的差異:
+  - 沒有系統匣圖示,關閉視窗時會縮到 Dock。
+  - 圖示的外框是依 Finder 的圖示大小估算的,不像 Windows 那麼精確(留白會把誤差蓋過去)。
+  - Finder 記錄圖示位置有時會晚幾秒,所以拖動圖示後桌布可能過幾秒才更新(最慢約 10 秒)。
+  - 只會改「目前這個桌面空間(Space)」的桌布。
+  - 「全螢幕時暫停」在 Mac 上沒有作用。
+- 開機啟動是在 `~/Library/LaunchAgents/com.deskisle.app.plist` 放一個登入項目。
+- 設定與產生的桌布在 `~/Library/Application Support/DeskIsle/`。
+- 在 Mac 上執行 `python3 build.py` 會打包成 `dist/DeskIsle.app`(PyInstaller 不能跨平台打包)。
+
 ## 從原始碼執行(開發用)
 
 需要 Python 3.9 以上(64 位元):
@@ -105,7 +129,7 @@ dist\DeskIsle.exe --selftest 結果.json     不開視窗、不動桌布的自�
 
 ## 設定檔
 
-`%LOCALAPPDATA%\DeskIsle\config.json`,介面會自動寫入。各項目的說明見 [PLAN.md](PLAN.md) 第 12 節。
+`%LOCALAPPDATA%\DeskIsle\config.json`(macOS:`~/Library/Application Support/DeskIsle/config.json`),介面會自動寫入。各項目的說明見 [PLAN.md](PLAN.md) 第 12 節。
 
 ## 已知限制
 
@@ -115,4 +139,5 @@ dist\DeskIsle.exe --selftest 結果.json     不開視窗、不動桌布的自�
   之類的樣式會跟著變成「填滿」。
 - 極地主題的雪地顏色偏淺,圖示的白色文字比較不明顯。
 - exe 尚未在其他電腦上測試過。
+- macOS 版尚未在實機上測試過(見上面的「macOS」一節)。
 - 目前的驗證狀態見 [PLAN.md](PLAN.md) 第 13 節。

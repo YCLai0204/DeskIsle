@@ -1,10 +1,12 @@
 """系統匣圖示與程式圖示。
 
 系統匣用 pystray;沒有安裝時 available() 回傳 False,介面會改成「縮到工作列」。
+macOS 上 pystray 必須佔用主執行緒,會跟 tkinter 衝突,所以不使用(關閉視窗時縮到 Dock)。
 系統匣的訊息迴圈在自己的執行緒裡等待,沒有事件時不耗 CPU。
 """
 from __future__ import annotations
 
+import sys
 from typing import Callable
 
 from PIL import Image, ImageDraw
@@ -30,6 +32,8 @@ def make_icon(size: int = 64) -> Image.Image:
 
 
 def available() -> bool:
+    if sys.platform == "darwin":
+        return False
     try:
         import pystray  # noqa: F401
         return True

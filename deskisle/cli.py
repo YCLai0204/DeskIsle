@@ -171,8 +171,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             pass
 
     args = _build_parser().parse_args(argv)
-    if sys.platform != "win32":
-        print("DeskIsle 目前只支援 Windows。", file=sys.stderr)
+    if sys.platform not in ("win32", "darwin"):
+        print("DeskIsle 只支援 Windows 與 macOS。", file=sys.stderr)
         return 2
     try:
         return _COMMANDS[args.command or "gui"](args)

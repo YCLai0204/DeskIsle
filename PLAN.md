@@ -5,7 +5,7 @@
 DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「跟著檔案長出來」的桌布:
 有檔案的地方是沙灘,沒有檔案的地方是海洋。把檔案拖到別處,陸地就跟著移動。
 
-目前版本:0.0.5(2026-11-12)
+目前版本:0.0.6(2026-11-12)
 
 ---
 
@@ -73,6 +73,8 @@ DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「�
 - [x] 0.0.2:自動跟隨時,圖示一移動就換一個種子(每次的海岸線都不同)
 - [x] 0.0.3:多螢幕各自套用;可勾選要更新哪些螢幕(橫向、直向都支援)
 - [x] 0.0.4:重新設計設定介面(標題列、主題縮圖、卡片式預覽、自訂勾選框與配色)
+- [x] 0.0.5:系統相關呼叫集中到 system.py
+- [x] 0.0.6:支援 macOS(實驗性,尚未在實機測試)
 
 ### 之後(未製作)
 
@@ -90,6 +92,7 @@ DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「�
 | 項目 | 選擇 | 理由 |
 |---|---|---|
 | 語言 | Python 3.9+(64 位元) | 影像運算有 numpy 可用;開發速度快 |
+| macOS 系統呼叫 | 內建的 `osascript`(AppleScript / JXA) | 不需要 pyobjc;讀 Finder 圖示位置、NSScreen、設定桌布 |
 | 圖示偵測 | `ctypes` 直接呼叫 Win32 | 不需額外套件;能取得完整矩形(圖示+文字標籤) |
 | 影像運算 | numpy | 1920×1080 的地形與上色約 0.45 秒 |
 | 影像輸出與裝飾物繪製 | Pillow | 縮放、PNG 輸出、向量繪圖 |
@@ -98,7 +101,7 @@ DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「�
 | 套用桌布 | `SystemParametersInfoW` + 登錄檔 | Windows 標準做法 |
 | 打包 | PyInstaller(單一檔案、無主控台) | 產生一個 exe,內含 Python 與所有相依套件 |
 
-執行時相依套件:`numpy`、`Pillow`、`pystray`(選用)。打包工具:`pyinstaller`。
+執行時相依套件:`numpy`、`Pillow`、`pystray`(選用,只有 Windows 使用)。打包工具:`pyinstaller`。
 
 ---
 
@@ -115,6 +118,9 @@ deskisle/
   gui_dev.py      測試頁(只有原始碼版本有;打包時排除)
   tray.py         系統匣圖示、程式圖示
   system.py       依作業系統選擇實作;其他模組只透過它呼叫系統功能
+  macos.py        macOS:螢幕清單、Finder 圖示位置、單一執行個體(osascript)
+  wallpaper_mac.py  macOS:套用、備份、還原桌布(NSWorkspace,透過 JXA)
+  autostart_mac.py  macOS:登入時啟動(LaunchAgent)
   autostart.py    開機自動啟動(目前使用者的啟動登錄機碼)
   config.py       設定:預設值、讀寫 JSON
   winapi.py       Win32 宣告、DPI、省資源相關、單一執行個體
@@ -176,6 +182,27 @@ Progman(或某個 WorkerW)
 5. 監看時不讀名稱(用不到),跨行程呼叫少一半。
 
 限制:程式必須與檔案總管同為 64 位元。
+
+### 6.8 macOS
+
+所有系統查詢都透過內建的 `osascript`,不需要安裝 pyobjc:
+
+| 功能 | 做法 |
+|---|---|
+| 螢幕清單、Retina 倍率 | JXA 讀 `NSScreen.screens`(frame、backingScaleFactor、NSScreenNumber) |
+| 圖示位置 | AppleScript 問 Finder `desktop position of every item of desktop`(圖示中心),外框依圖示大小、文字大小估算 |
+| 圖示是否隱藏 | `defaults read com.apple.finder CreateDesktop` |
+| 套用桌布 | JXA 呼叫 `NSWorkspace.setDesktopImageURL(forScreen:)`,逐一設定螢幕 |
+| 登入啟動 | `~/Library/LaunchAgents/com.deskisle.app.plist` |
+| 單一執行個體 | 暫存資料夾裡的 Unix socket;第二個執行個體連進來 = 叫出視窗 |
+| 系統匣 | 不使用(pystray 在 macOS 要佔用主執行緒,與 tkinter 衝突);關閉視窗時縮到 Dock |
+
+- 座標一律用「點」,原點是虛擬桌面左上角;套用時依每個螢幕的 Retina 倍率畫成實體像素。
+- 呼叫一次 osascript 約 0.1 秒,所以只在 `~/Desktop` 或它的 `.DS_Store` 變動時才問 Finder,
+  另外每 10 秒保險重讀一次;螢幕清單每 15 秒更新一次。
+- 第一次問 Finder 時 macOS 會要求「自動化」權限。打包的 `.app` 在 Info.plist 加上
+  `NSAppleEventsUsageDescription`(見 build.py),否則系統會直接拒絕。
+- macOS 只會改目前桌面空間(Space)的桌布。
 
 ### 6.2 座標對應
 
@@ -415,6 +442,7 @@ python -m deskisle config [--save]     顯示/儲存設定
 | exe 常駐 | 已實測閒置資源用量;單一執行個體已實測 |
 | 系統匣 | exe 啟動時有建立;選單尚未實際操作 |
 | 在其他電腦執行 exe | 尚未測試 |
+| macOS | 尚未在實機測試。解析 osascript 輸出、快取、桌布備份還原、登入啟動有自動化測試(假的 osascript);在 Windows 上模擬 macOS 匯入路徑,介面能建立、不會載入任何 Windows 專用模組 |
 | 套用/還原/監看(真實桌面) | 邏輯有自動化測試;開發過程中刻意不改動使用者的桌布 |
 | 多螢幕、非 100% 縮放 | 尚未實測。多螢幕的繪製、勾選、套用邏輯有自動化測試(假的 COM 物件);IDesktopWallpaper 的讀取已在單螢幕實測 |
 

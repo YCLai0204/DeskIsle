@@ -476,7 +476,8 @@ class App:
         ttk.Checkbutton(page, text="圖示移動後換一種海岸線形狀(每次都不一樣)",
                         variable=self.var_reseed, command=self._behavior_changed).grid(
             row=2, column=0, columnspan=3, sticky="w")
-        ttk.Checkbutton(page, text="開機時自動啟動(縮在系統匣)",
+        ttk.Checkbutton(page, text="登入時自動啟動(縮到 Dock)" if sys.platform == "darwin"
+                        else "開機時自動啟動(縮在系統匣)",
                         variable=self.var_autostart, command=self._autostart_toggled).grid(
             row=3, column=0, columnspan=3, sticky="w")
 

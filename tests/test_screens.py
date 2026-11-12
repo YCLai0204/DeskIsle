@@ -111,6 +111,20 @@ class RenderScreensTests(unittest.TestCase):
             [("monitor-left", (320, 180)), ("monitor-right", (120, 220))],
         ])
 
+    def test_retina_screens_are_drawn_in_physical_pixels(self):
+        from deskisle import watcher
+        retina = DesktopLayout(440, 220, ICONS, screens=(
+            Screen("mac-1", 0, 40, 320, 180, True, scale=2.0), Screen("mac-2", 320, 0, 120, 220)))
+        single = DesktopLayout(160, 100, (), screens=(Screen("mac-1", 0, 0, 160, 100, True, scale=2.0),))
+        sizes = []
+        with mock.patch.object(watcher.wallpaper, "apply_per_screen",
+                               lambda images: sizes.extend(i.size for _s, i in images) or []), \
+                mock.patch.object(watcher.wallpaper, "apply_image",
+                                  lambda image, monitors=1: sizes.append(image.size) or Path("x.png")):
+            watcher.apply_layout(retina, Config(decorations=0))
+            watcher.apply_layout(single, Config(decorations=0))
+        self.assertEqual(sizes, [(640, 360), (120, 220), (320, 200)])
+
     def test_without_ids_everything_is_one_spanned_image(self):
         from deskisle import watcher
         layout = DesktopLayout(440, 220, ICONS, screens=(
