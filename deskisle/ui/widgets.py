@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import time
 import tkinter as tk
 from typing import Callable, Dict, Optional
 
@@ -543,7 +544,7 @@ class Segmented(_CanvasWidget):
 
 # ---------------------------------------------------------------------------
 class Dropdown(_CanvasWidget):
-    """下拉選單:看起來像按鈕,點一下跳出選項清單。綁定一個 StringVar。"""
+    """下拉選單:看起來像按鈕,點一下在下方跳出自己畫的選項清單(見 DropdownPopup)。綁定一個 StringVar。"""
 
     def __init__(self, parent, kit: Kit, options, variable: tk.StringVar, command: Optional[Callable] = None,
                  bg: Optional[str] = None):
@@ -556,16 +557,12 @@ class Dropdown(_CanvasWidget):
         super().__init__(parent, kit, bg, width=width, height=height, cursor="hand2", takefocus=1)
         self.variable, self.command = variable, command
         self.size = (width, height)
-        self._chosen = tk.StringVar(master=kit.root, value=variable.get())
-        p = kit.p
-        self.menu = tk.Menu(self, tearoff=0, background=p.card, foreground=p.text, activebackground=p.accent_soft,
-                            activeforeground=p.text, selectcolor=p.accent, font=font, borderwidth=0)
-        for value, text in self.options:
-            self.menu.add_radiobutton(label=text, value=value, variable=self._chosen, command=self._picked)
+        self.popup: Optional["DropdownPopup"] = None
+        self._closed_at = 0.0
         self._watch(variable, self._paint)
         for sequence, handler in (("<Enter>", self._enter), ("<Leave>", self._leave),
                                   ("<ButtonRelease-1>", self._open), ("<KeyPress-space>", self._open),
-                                  ("<KeyPress-Return>", self._open)):
+                                  ("<KeyPress-Return>", self._open), ("<KeyPress-Down>", self._open)):
             self.bind(sequence, handler)
         self._paint()
 
@@ -577,30 +574,31 @@ class Dropdown(_CanvasWidget):
         p, kit, px = self.kit.p, self.kit, self.kit.px
         self.delete("all")
         width, height = self.size
+        opened = self.popup is not None
         self.create_image(0, 0, anchor="nw", image=kit.round_rect(
-            width, height, px(7), p.card_hover if self.hover else p.card, p.border_strong))
+            width, height, px(7), p.card_hover if (self.hover or opened) else p.card,
+            p.accent if opened else p.border_strong))
         self.create_text(self._pad, height / 2, anchor="w", text=self.text(), fill=p.text, font=kit.fonts["caption"])
         self.create_image(width - self._pad + px(2), height / 2, anchor="e",
-                          image=kit.icon("chevron", self._arrow, p.muted))
+                          image=kit.icon("chevron", self._arrow, p.text if opened else p.muted))
 
     def _open(self, _event=None) -> None:
-        self.focus_set()
-        self._chosen.set(self.variable.get())
-        try:
-            self.menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.size[1] + self.kit.px(2))
-        finally:
-            self.menu.grab_release()
+        if self.popup is not None or time.monotonic() - self._closed_at < 0.25:
+            return      # 剛剛才因為點這裡而關掉(清單失去焦點),不要馬上又打開
+        self.popup = DropdownPopup(self)
+        self._paint()
 
-    def _picked(self) -> None:
-        if self._chosen.get() != self.variable.get():
-            self.variable.set(self._chosen.get())
-            if self.command:
-                self.command()
+    def _popup_closed(self) -> None:
+        self.popup = None
+        self._closed_at = time.monotonic()
+        self._safe(self._paint)
 
     def choose(self, value: str) -> None:
-        """跟使用者從清單選一樣(測試用)。"""
-        self._chosen.set(value)
-        self._picked()
+        """選一個值(清單裡點選,或測試時直接呼叫)。"""
+        if value != self.variable.get():
+            self.variable.set(value)
+            if self.command:
+                self.command()
 
     def _enter(self, _event) -> None:
         self.hover = True
@@ -608,6 +606,144 @@ class Dropdown(_CanvasWidget):
 
     def _leave(self, _event) -> None:
         self.hover = False
+        self._paint()
+
+
+class DropdownPopup(tk.Toplevel):
+    """下拉選單跳出來的清單:沒有標題列的小視窗,卡片底色、滑過有底色、選中的有強調色短線與打勾。
+
+    超過 MAX_ROWS 項時可以用滾輪捲動。點選項或按 Enter 選擇;按 Esc 或點到別的地方就關閉。
+    """
+
+    MAX_ROWS = 8
+
+    def __init__(self, owner: Dropdown):
+        kit = owner.kit
+        p, px = kit.p, kit.px
+        super().__init__(owner, background=p.border_strong)
+        self.owner, self.kit = owner, kit
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        font = kit.fonts["bold"]
+        self.row_h, self.inset, self.check = px(32), px(5), px(14)
+        text_w = max(font.measure(text) for _value, text in owner.options)
+        self.width = max(owner.size[0], text_w + px(16) * 2 + self.check + px(10))
+        self.height = min(len(owner.options), self.MAX_ROWS) * self.row_h + self.inset * 2
+        self.total = len(owner.options) * self.row_h + self.inset * 2
+        self.canvas = tk.Canvas(self, width=self.width, height=self.height, background=p.card,
+                                highlightthickness=0, borderwidth=0, scrollregion=(0, 0, self.width, self.total),
+                                yscrollincrement=1)
+        self.canvas.pack(padx=1, pady=1)
+        values = [value for value, _text in owner.options]
+        current = owner.variable.get()
+        self.hover = values.index(current) if current in values else 0
+        self._place()
+        self._paint()
+        self._scroll_to(self.hover)
+
+        for sequence, handler in (("<Motion>", self._move), ("<ButtonRelease-1>", self._click),
+                                  ("<MouseWheel>", self._wheel), ("<Button-4>", self._wheel),
+                                  ("<Button-5>", self._wheel),
+                                  ("<KeyPress-Up>", lambda _e: self._step(-1)),
+                                  ("<KeyPress-Down>", lambda _e: self._step(1)),
+                                  ("<KeyPress-Return>", lambda _e: self._pick(self.hover)),
+                                  ("<KeyPress-space>", lambda _e: self._pick(self.hover)),
+                                  ("<KeyPress-Escape>", lambda _e: self.close()),
+                                  ("<FocusOut>", lambda _e: self.close())):
+            self.canvas.bind(sequence, handler)
+        self.update_idletasks()
+        try:
+            from .. import system
+            system.round_window_corners(self.winfo_id())
+        except Exception:
+            pass
+        self.canvas.focus_force()
+
+    def _place(self) -> None:
+        """放在下拉選單正下方;下面放不下就放上面。"""
+        owner, px = self.owner, self.kit.px
+        x = owner.winfo_rootx()
+        y = owner.winfo_rooty() + owner.size[1] + px(4)
+        if y + self.height + 2 > owner.winfo_screenheight():
+            y = owner.winfo_rooty() - self.height - 2 - px(4)
+        x = max(0, min(x, owner.winfo_screenwidth() - self.width - 2))
+        self.geometry(f"{self.width + 2}x{self.height + 2}+{x}+{y}")
+
+    def _paint(self) -> None:
+        kit, p, px = self.kit, self.kit.p, self.kit.px
+        c = self.canvas
+        c.delete("all")
+        current = self.owner.variable.get()
+        for index, (value, text) in enumerate(self.owner.options):
+            top = self.inset + index * self.row_h
+            middle = top + self.row_h / 2
+            selected = value == current
+            if index == self.hover or selected:
+                kit.draw_box(c, self.inset, top + 1, self.width - self.inset, top + self.row_h - 1, px(6),
+                             p.border if index == self.hover and not selected else p.accent_soft)
+            if selected:
+                c.create_image(self.inset + px(1), middle, anchor="w",
+                               image=kit.round_rect(px(3), px(14), px(1.5), p.accent))
+                c.create_image(self.width - self.inset - px(10), middle, anchor="e",
+                               image=kit.icon("check", self.check, p.accent))
+            c.create_text(self.inset + px(14), middle, anchor="w", text=text,
+                          fill=p.accent if selected else p.text, font=kit.fonts["bold" if selected else "caption"])
+
+    def _index_at(self, y: int) -> int:
+        index = int((self.canvas.canvasy(y) - self.inset) // self.row_h)
+        return index if 0 <= index < len(self.owner.options) else -1
+
+    def _scroll_to(self, index: int) -> None:
+        if self.total <= self.height:
+            return
+        top, bottom = self.canvas.canvasy(0), self.canvas.canvasy(self.height)
+        row_top = self.inset + index * self.row_h
+        if row_top < top:
+            self.canvas.yview_moveto(max(0.0, (row_top - self.inset) / self.total))
+        elif row_top + self.row_h > bottom:
+            self.canvas.yview_moveto(max(0.0, (row_top + self.row_h + self.inset - self.height) / self.total))
+
+    def _move(self, event) -> None:
+        index = self._index_at(event.y)
+        if index >= 0 and index != self.hover:
+            self.hover = index
+            self._paint()
+
+    def _step(self, direction: int) -> None:
+        self.hover = max(0, min(len(self.owner.options) - 1, self.hover + direction))
+        self._paint()
+        self._scroll_to(self.hover)
+
+    def _wheel(self, event) -> str:
+        if getattr(event, "num", None) in (4, 5):
+            steps = -1 if event.num == 4 else 1
+        else:
+            steps = -1 if event.delta > 0 else 1
+        if self.total > self.height:
+            self.canvas.yview_scroll(steps * self.row_h, "units")
+            self._move(event)
+        return "break"     # 不要讓後面的設定頁跟著捲
+
+    def _click(self, event) -> None:
+        index = self._index_at(event.y)
+        if index >= 0:
+            self._pick(index)
+
+    def _pick(self, index: int) -> None:
+        value = self.owner.options[index][0]
+        self.close()
+        self.owner.choose(value)
+
+    def close(self) -> None:
+        try:
+            if not self.winfo_exists():
+                return
+            self.destroy()
+        except tk.TclError:
+            return
+        self.owner._popup_closed()
+
+    def recolor(self, mapping) -> None:
         self._paint()
 
 

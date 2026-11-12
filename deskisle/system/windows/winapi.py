@@ -204,6 +204,22 @@ DWMWA_CAPTION_COLOR = 35      # Windows 11 才有;舊版會回傳錯誤,忽略�
 DWMWA_TEXT_COLOR = 36
 
 
+DWMWA_WINDOW_CORNER_PREFERENCE = 33   # Windows 11 才有
+DWMWCP_ROUND = 2
+
+
+def round_window_corners(window_id: int) -> None:
+    """Windows 11:讓沒有標題列的小視窗(下拉清單)也有圓角。舊版 Windows 沒有效果。"""
+    try:
+        dwmapi = ctypes.WinDLL("dwmapi")
+    except OSError:
+        return
+    hwnd = user32.GetParent(window_id) or window_id
+    value = wintypes.DWORD(DWMWCP_ROUND)
+    dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), wintypes.DWORD(DWMWA_WINDOW_CORNER_PREFERENCE),
+                                 ctypes.byref(value), ctypes.sizeof(value))
+
+
 def style_title_bar(window_id: int, dark: bool, caption: str = "", text: str = "") -> None:
     """讓視窗標題列跟介面配色一致:深色模式、標題列底色與文字顏色(#rrggbb)。
 

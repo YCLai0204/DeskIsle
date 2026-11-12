@@ -279,6 +279,10 @@ def style_title_bar(window_id: int, dark: bool, caption: str = "", text: str = "
     """macOS 的標題列會自己跟著系統外觀,不需要設定。"""
 
 
+def round_window_corners(window_id: int) -> None:
+    """macOS 不需要。"""
+
+
 def desktop_is_foreground() -> bool:
     """Mac 上沒變動時讀取幾乎不花成本,一律以「正對桌面」的間隔檢查。"""
     return True

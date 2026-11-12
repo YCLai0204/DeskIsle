@@ -8,7 +8,7 @@ for _name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_name, "1")
 
 APP_NAME = "DeskIsle"
-__version__ = "0.0.17"
+__version__ = "0.0.18"
 
 
 def is_frozen() -> bool:

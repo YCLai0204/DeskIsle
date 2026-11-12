@@ -303,6 +303,36 @@ class GuiTests(unittest.TestCase):
             app.export_png()
         self.assertTrue(app.export_button.enabled)
 
+    def test_dropdown_opens_its_own_list_and_picks_by_click_or_keyboard(self):
+        import tkinter as tk
+        from deskisle.ui import style
+        from deskisle.ui.widgets import Dropdown, Kit
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        root.geometry("+50+50")
+        var = tk.StringVar(value="7")
+        picks = []
+        box = Dropdown(root, Kit(root, style.LIGHT), [(str(h), f"{h:02d}:00") for h in range(24)], var,
+                       lambda: picks.append(var.get()))
+        box.pack()
+        root.update()
+        box._open()
+        popup = box.popup
+        self.assertIsNotNone(popup)
+        self.assertEqual(popup.hover, 7)                              # 一打開就停在目前的值
+        self.assertLessEqual(popup.height, popup.MAX_ROWS * popup.row_h + popup.inset * 2)   # 太長的清單可以捲
+        popup._step(1)
+        popup._step(1)
+        popup._pick(popup.hover)                                      # 鍵盤:往下兩格再按 Enter
+        self.assertEqual((var.get(), picks), ("9", ["9"]))
+        self.assertIsNone(box.popup)
+        self.assertFalse(popup.winfo_exists())
+        box._closed_at = 0
+        box._open()
+        box.popup.close()                                             # Esc 或點到別處:不改值
+        self.assertEqual(var.get(), "9")
+        self.assertIsNone(box.popup)
+
     def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
         app, root = self._make_app()
         app._on_reseed(4321)

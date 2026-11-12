@@ -18,6 +18,7 @@
     prefers_dark()                系統是不是深色模式(介面配色跟著它)
     desktop_folders()             桌面圖示來自哪些資料夾(判斷檔案類型用)
     style_title_bar(id, dark, …)  讓視窗標題列配合介面配色(只有 Windows 需要)
+    round_window_corners(id)      沒有標題列的小視窗也有圓角(Windows 11)
     acquire_single_instance / create_signal / wait_signal / send_signal   只允許一個執行個體
 """
 from __future__ import annotations
@@ -34,7 +35,8 @@ if sys.platform == "win32":
     from .windows.icons import read_layout  # noqa: F401
     from .windows.winapi import (  # noqa: F401
         acquire_single_instance, create_signal, desktop_folders, desktop_is_foreground, enable_dpi_awareness,
-        lower_thread_priority, monitor_count, prefers_dark, send_signal, style_title_bar, trim_memory,
+        lower_thread_priority, monitor_count, prefers_dark, round_window_corners, send_signal, style_title_bar,
+        trim_memory,
         ui_scale, user_is_busy, virtual_screen, wait_signal,
     )
 
@@ -46,7 +48,8 @@ elif sys.platform == "darwin":
     from .macos import autostart, wallpaper  # noqa: F401
     from .macos.desktop import (  # noqa: F401
         acquire_single_instance, create_signal, desktop_folders, desktop_is_foreground, enable_dpi_awareness,
-        list_screens, lower_thread_priority, monitor_count, prefers_dark, read_layout, send_signal,
+        list_screens, lower_thread_priority, monitor_count, prefers_dark, read_layout, round_window_corners,
+        send_signal,
         style_title_bar, trim_memory, ui_scale, user_is_busy, virtual_screen, wait_signal,
     )
 
