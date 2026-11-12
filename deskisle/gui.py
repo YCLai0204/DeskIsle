@@ -21,33 +21,71 @@ import tkinter as tk
 import traceback
 from dataclasses import replace
 from tkinter import messagebox, ttk
-from typing import Optional
+from typing import Optional, Tuple
+
+from PIL import Image, ImageDraw, ImageFont
 
 from . import APP_NAME, __version__, autostart, is_frozen, tray, wallpaper, winapi
+from . import screens as screen_api
 from .config import Config, app_dir, load_config, save_config
-from .icons import DesktopLayout, read_layout
-from .render import render
+from .icons import read_layout
+from .layout import DesktopLayout, Screen
 from .themes import THEMES, get_theme
-from .watcher import Watcher, WatchStatus, apply_layout, look_key
+from .watcher import Watcher, WatchStatus, apply_layout, look_key, render_screen
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
 PREVIEW_WIDTH = 520
 LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations")
+PREVIEW_GAP = (30, 34, 42)        # 預覽中螢幕之間的空隙
+PREVIEW_SKIPPED = (62, 68, 80)    # 預覽中「不更新」的螢幕
 STATE_TEXT = {"following": "跟隨中", "paused": "暫停中", "error": "發生問題", "stopped": "未啟動"}
 
 
+def _badge_font(size: int):
+    for name in ("segoeuib.ttf", "arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size)
+    except TypeError:   # Pillow 10.1 以前
+        return ImageFont.load_default()
+
+
 def render_preview(layout: DesktopLayout, config: Config, width: int, debug: bool = False) -> bytes:
-    """把一個排列畫成寬 width 的縮小版,回傳 PNG 位元組。"""
+    """把一個排列畫成寬 width 的縮小版,回傳 PNG 位元組。
+
+    多螢幕時每個螢幕左上角標上編號;沒有選要更新的螢幕畫成灰色斜線。
+    """
     ratio = width / layout.width
     height = max(1, int(round(layout.height * ratio)))
-    rects = [(int(l * ratio), int(t * ratio), max(int(r * ratio), int(l * ratio) + 1),
-              max(int(b * ratio), int(t * ratio) + 1)) for l, t, r, b in layout.rects]
-    image = render(
-        width, height, rects, get_theme(config.theme),
-        margin=config.margin, blend=config.blend, roughness=config.roughness, seed=config.seed,
-        scale=winapi.ui_scale() * ratio, decorations=config.decorations, debug=debug,
-    )
+    screens = layout.screen_list()
+    if len(screens) == 1:
+        image = render_screen(layout, config, 0, ratio, debug)
+    else:
+        chosen = set(layout.selected_screens(config.screens))
+        image = Image.new("RGB", (width, height), PREVIEW_GAP)
+        draw = ImageDraw.Draw(image)
+        badge = max(14, int(18 * winapi.ui_scale()))
+        font = _badge_font(int(badge * 0.62))
+        for number, screen in enumerate(screens, 1):
+            box = (int(round(screen.left * ratio)), int(round(screen.top * ratio)),
+                   int(round(screen.right * ratio)) - 1, int(round(screen.bottom * ratio)) - 1)
+            if screen in chosen:
+                image.paste(render_screen(layout, config, number - 1, ratio, debug), box[:2])
+            else:
+                w, h = box[2] - box[0] + 1, box[3] - box[1] + 1
+                tile = Image.new("RGB", (w, h), PREVIEW_SKIPPED)
+                hatch = ImageDraw.Draw(tile)
+                for x in range(-h, w, 10):          # 斜線(超出範圍的部分會自動裁掉)
+                    hatch.line((x, h, x + h, 0), fill=PREVIEW_GAP, width=2)
+                image.paste(tile, box[:2])
+            draw.rectangle(box, outline=PREVIEW_GAP)
+            x, y = box[0] + 6, box[1] + 6
+            draw.ellipse((x, y, x + badge, y + badge), fill=(255, 255, 255), outline=PREVIEW_GAP)
+            draw.text((x + badge / 2, y + badge / 2), str(number), fill=(30, 34, 42), font=font, anchor="mm")
     buffer = io.BytesIO()
     image.save(buffer, "PNG", compress_level=1)
     return buffer.getvalue()
@@ -235,6 +273,70 @@ class App:
         ttk.Button(page, text="恢復預設外觀", command=self._reset_look).grid(
             row=11, column=0, columnspan=3, sticky="w", pady=(16, 0))
 
+        self.screen_box = ttk.LabelFrame(page, text="要更新的螢幕", padding=8)
+        self.screen_box.grid(row=12, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        self._screens: Tuple[Screen, ...] = ()
+        self._screen_vars = {}
+        self._screen_choice: Tuple[str, ...] = self.applied.screens
+        self._set_screens(self._current_screens())
+
+    # ---------------------------------------------------------------- 螢幕選擇
+    @staticmethod
+    def _current_screens() -> Tuple[Screen, ...]:
+        try:
+            vx, vy, _w, _h = winapi.virtual_screen()
+            return screen_api.list_screens(vx, vy)
+        except OSError:
+            return ()
+
+    def _set_screens(self, screens: Tuple[Screen, ...]) -> None:
+        """依目前接著的螢幕重建勾選框(螢幕沒變就不動)。"""
+        if screens == self._screens and self.screen_box.winfo_children():
+            return
+        self._screens = screens
+        for child in self.screen_box.winfo_children():
+            child.destroy()
+        self._screen_vars = {}
+        choosable = DesktopLayout(1, 1, (), screens=screens).can_choose_screens()
+        for number, screen in enumerate(screens, 1):
+            var = tk.BooleanVar(value=True)
+            box = ttk.Checkbutton(self.screen_box, text=screen.describe(number), variable=var,
+                                  command=self._screens_toggled)
+            box.grid(row=number - 1, column=0, sticky="w")
+            box._var = var   # 沒有放進 _screen_vars 的也要留住,勾選狀態才不會消失
+            if choosable:
+                self._screen_vars[screen.id] = var
+            else:
+                box.state(["disabled"])
+        if len(screens) <= 1:
+            hint = "只有一個螢幕。"
+        elif choosable:
+            hint = "可以只更新部分螢幕(直向、橫向都可以),沒勾選的螢幕維持原本的桌布。"
+        else:
+            hint = "這台電腦無法各自設定每個螢幕,會把所有螢幕畫成一張圖。"
+        ttk.Label(self.screen_box, text=hint, foreground="#666666", wraplength=320, justify="left").grid(
+            row=len(screens), column=0, sticky="w", pady=(4, 0))
+        self._sync_screen_vars()
+
+    def _sync_screen_vars(self) -> None:
+        """把 _screen_choice 反映到勾選框。"""
+        wanted = set(self._screen_choice)
+        present = [i for i in self._screen_vars if i in wanted]
+        for screen_id, var in self._screen_vars.items():
+            var.set(not present or screen_id in wanted)
+
+    def _screens_toggled(self) -> None:
+        checked = [i for i, var in self._screen_vars.items() if var.get()]
+        if not checked:
+            # 至少要留一個螢幕
+            self._sync_screen_vars()
+            self.set_status("至少要選一個螢幕。")
+            return
+        missing = tuple(i for i in self._screen_choice if i not in self._screen_vars)  # 目前沒接上的螢幕
+        everything = len(checked) == len(self._screen_vars)
+        self._screen_choice = () if everything and not missing else tuple(checked) + missing
+        self._look_changed()
+
     def _build_behavior_page(self) -> None:
         page = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(page, text="運作")
@@ -285,6 +387,9 @@ class App:
         self.var_roughness.set(config.roughness)
         self.var_decor.set(config.decorations)
         self.var_follow.set(config.follow)
+        if hasattr(self, "_screen_vars"):
+            self._screen_choice = config.screens
+            self._sync_screen_vars()
         self.var_pause.set(config.pause_when_busy)
         self.var_reseed.set(config.reseed_on_move)
         self.var_poll.set(config.poll_interval)
@@ -325,6 +430,7 @@ class App:
             debounce=round(self.var_debounce.get(), 1),
             pause_when_busy=bool(self.var_pause.get()),
             reseed_on_move=bool(self.var_reseed.get()),
+            screens=self._screen_choice,
         ).validate()
 
     def _save(self) -> None:
@@ -478,12 +584,14 @@ class App:
         try:
             layout = override or read_layout(names=False)
             data = render_preview(layout, config, width, debug)
-            self._ui(self._preview_done, data, "")
+            self._ui(self._preview_done, data, "", None if override else layout.screens)
         except Exception as exc:
             self._ui(self._preview_done, None, str(exc))
 
-    def _preview_done(self, data: Optional[bytes], error: str) -> None:
+    def _preview_done(self, data: Optional[bytes], error: str, screens=None) -> None:
         self._preview_busy = False
+        if screens is not None and screens != self._screens:
+            self._set_screens(screens)   # 螢幕接上或拔掉了
         if data is not None:
             self._photo = tk.PhotoImage(data=base64.b64encode(data))
             self.preview_label.configure(image=self._photo, text="")

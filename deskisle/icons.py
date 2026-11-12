@@ -9,10 +9,11 @@ from __future__ import annotations
 import ctypes
 import sys
 from ctypes import wintypes
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
+from . import screens as screen_api
 from . import winapi
+from .layout import DesktopIcon, DesktopLayout, Screen  # noqa: F401(其他模組從這裡匯入)
 from .winapi import kernel32, user32
 
 LVM_FIRST = 0x1000
@@ -48,37 +49,6 @@ class _LVITEMW(ctypes.Structure):
         ("piColFmt", ctypes.c_void_p),
         ("iGroup", ctypes.c_int),
     ]
-
-
-@dataclass(frozen=True)
-class DesktopIcon:
-    """一個桌面圖示;座標是圖片座標(以虛擬桌面左上角為原點的實體像素)。"""
-    name: str
-    left: int
-    top: int
-    right: int
-    bottom: int
-
-    @property
-    def rect(self) -> Tuple[int, int, int, int]:
-        return (self.left, self.top, self.right, self.bottom)
-
-
-@dataclass(frozen=True)
-class DesktopLayout:
-    width: int
-    height: int
-    icons: Tuple[DesktopIcon, ...]
-    icons_visible: bool = True
-    monitors: int = 1
-
-    @property
-    def rects(self) -> List[Tuple[int, int, int, int]]:
-        return [icon.rect for icon in self.icons]
-
-    def signature(self) -> tuple:
-        """排列的特徵值:只要會影響畫面的東西有變,這個值就會變。"""
-        return (self.width, self.height, self.monitors, tuple(sorted(i.rect for i in self.icons)))
 
 
 def find_desktop_listview() -> Optional[int]:
@@ -164,7 +134,7 @@ def read_layout(names: bool = True) -> DesktopLayout:
 
     winapi.enable_dpi_awareness()
     vx, vy, width, height = winapi.virtual_screen()
-    monitors = winapi.monitor_count()
+    screens = screen_api.list_screens(vx, vy)
 
     listview = find_desktop_listview()
     if not listview:
@@ -172,7 +142,7 @@ def read_layout(names: bool = True) -> DesktopLayout:
 
     if not user32.IsWindowVisible(listview):
         # 使用者關閉了「顯示桌面圖示」
-        return DesktopLayout(width, height, (), icons_visible=False, monitors=monitors)
+        return DesktopLayout(width, height, (), icons_visible=False, screens=screens)
 
     pid = wintypes.DWORD(0)
     user32.GetWindowThreadProcessId(listview, ctypes.byref(pid))
@@ -200,7 +170,7 @@ def read_layout(names: bool = True) -> DesktopLayout:
                 if icon is not None:
                     icons.append(icon)
 
-    return DesktopLayout(width, height, tuple(icons), icons_visible=True, monitors=monitors)
+    return DesktopLayout(width, height, tuple(icons), icons_visible=True, screens=screens)
 
 
 def _read_icon(listview, buf: _RemoteBuffer, index: int, dx: int, dy: int,

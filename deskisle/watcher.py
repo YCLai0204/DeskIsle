@@ -15,25 +15,57 @@ import time
 from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
+from PIL import Image
+
 from . import decor, wallpaper, winapi
 from .config import Config
-from .icons import DesktopLayout, IconDetectionError, read_layout
+from .icons import IconDetectionError, read_layout
+from .layout import DesktopLayout, screen_rects
 from .render import render
 from .themes import get_theme
 
+GAP_COLOR = (0, 0, 0)   # 多螢幕合成圖中,沒有螢幕的空隙
 
-def render_layout(layout: DesktopLayout, config: Config, debug: bool = False):
-    """依設定把一個排列畫成圖片。"""
+
+def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: float = 1.0,
+                  debug: bool = False) -> Image.Image:
+    """畫出第 index 個螢幕的桌布。ratio < 1 時畫縮小版(預覽用)。
+
+    每個螢幕各自計算地形;種子加上螢幕序號,讓同尺寸的螢幕也不會長得一樣。
+    """
+    screen = layout.screen_list()[index]
+    width = max(1, int(round(screen.width * ratio)))
+    height = max(1, int(round(screen.height * ratio)))
     return render(
-        layout.width, layout.height, layout.rects, get_theme(config.theme),
+        width, height, screen_rects(layout, screen, ratio), get_theme(config.theme),
         margin=config.margin, blend=config.blend, roughness=config.roughness,
-        seed=config.seed, scale=winapi.ui_scale(), decorations=config.decorations, debug=debug,
+        seed=config.seed + 1013 * index, scale=winapi.ui_scale() * ratio,
+        decorations=config.decorations, debug=debug,
     )
 
 
+def render_layout(layout: DesktopLayout, config: Config, debug: bool = False) -> Image.Image:
+    """把整個桌面(所有螢幕)畫成一張圖。"""
+    screens = layout.screen_list()
+    if len(screens) == 1 and (screens[0].width, screens[0].height) == (layout.width, layout.height):
+        return render_screen(layout, config, 0, debug=debug)
+    canvas = Image.new("RGB", (layout.width, layout.height), GAP_COLOR)
+    for index, screen in enumerate(screens):
+        canvas.paste(render_screen(layout, config, index, debug=debug), (screen.left, screen.top))
+    return canvas
+
+
 def apply_layout(layout: DesktopLayout, config: Config):
-    """畫圖並設為桌布;回傳桌布檔案路徑。"""
-    return wallpaper.apply_image(render_layout(layout, config), layout.monitors)
+    """畫圖並設為桌布;回傳桌布檔案路徑的清單。
+
+    多螢幕而且系統支援時,只畫、只更新設定裡選的螢幕;否則整個桌面畫成一張圖套用。
+    """
+    if layout.can_choose_screens():
+        screens = layout.screen_list()
+        images = [(screen, render_screen(layout, config, screens.index(screen)))
+                  for screen in layout.selected_screens(config.screens)]
+        return wallpaper.apply_per_screen(images)
+    return [wallpaper.apply_image(render_layout(layout, config), layout.monitors)]
 
 
 def new_seed(old: int) -> int:
@@ -47,7 +79,7 @@ def new_seed(old: int) -> int:
 def look_key(config: Config) -> tuple:
     """設定中會影響畫面的部分;這些一變就要重畫。"""
     return (config.theme, config.seed, config.margin, config.blend, config.roughness,
-            config.decorations)
+            config.decorations, config.screens)
 
 
 class LayoutDebouncer:

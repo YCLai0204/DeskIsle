@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import shutil
 import winreg
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image
 
+from . import screens as screen_api
 from .config import app_dir
+from .layout import Screen
 from .winapi import user32
 
 SPI_SETDESKWALLPAPER = 0x0014
@@ -37,6 +40,7 @@ class WallpaperState:
     tile: str            # TileWallpaper 登錄值
     kind: int = 0        # 背景類型,見 BACKGROUND_KINDS
     backup: str = ""     # 原圖備份的檔名(在 app_dir 內),沒有則為空
+    per_monitor: Dict[str, str] = field(default_factory=dict)   # 多螢幕時每個螢幕原本的圖片
 
 
 def state_path() -> Path:
@@ -85,6 +89,21 @@ def is_ours(path: str) -> bool:
         return False
 
 
+def monitor_wallpapers() -> Dict[str, str]:
+    """多螢幕時,每個螢幕目前的桌布圖片;單螢幕或系統不支援時回傳空的。"""
+    if len(screen_api.monitor_rects()) < 2:
+        return {}
+    found = {}
+    try:
+        with screen_api.open_desktop_wallpaper() as desktop:
+            for monitor_id in desktop.monitor_ids():
+                if monitor_id and desktop.monitor_rect(monitor_id) is not None:
+                    found[monitor_id] = desktop.get_wallpaper(monitor_id)
+    except OSError:
+        return {}
+    return found
+
+
 def load_backup() -> Optional[WallpaperState]:
     try:
         data = json.loads(state_path().read_text(encoding="utf-8"))
@@ -112,7 +131,8 @@ def backup_original() -> Optional[WallpaperState]:
             shutil.copy2(source, folder / backup_name)
         except OSError:
             backup_name = ""
-    state = WallpaperState(state.path, state.style, state.tile, state.kind, backup_name)
+    per_monitor = {k: v for k, v in monitor_wallpapers().items() if not is_ours(v)}
+    state = WallpaperState(state.path, state.style, state.tile, state.kind, backup_name, per_monitor)
     state_path().write_text(json.dumps(asdict(state), indent=2, ensure_ascii=False), encoding="utf-8")
     return state
 
@@ -131,6 +151,50 @@ def apply_image(image: Image.Image, monitors: int = 1) -> Path:
     return target
 
 
+def _screen_file_names(screen: Screen) -> Tuple[str, str]:
+    """每個螢幕自己的兩個交替檔名(依螢幕代碼,拔插螢幕後仍是同一組)。"""
+    key = hashlib.sha1(screen.id.encode("utf-8")).hexdigest()[:8]
+    return (f"wallpaper_{key}_a.png", f"wallpaper_{key}_b.png")
+
+
+def apply_per_screen(images: Sequence[Tuple[Screen, Image.Image]]) -> List[Path]:
+    """每個螢幕各自設定桌布(只動 images 裡的螢幕,其他螢幕維持原樣)。
+
+    第一次呼叫時會先備份原本的桌布。回傳寫出的檔案路徑。
+    """
+    backup_original()
+    folder = app_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    written = []
+    with screen_api.open_desktop_wallpaper() as desktop:
+        desktop.set_position(screen_api.DWPOS_FILL)
+        for screen, image in images:
+            names = _screen_file_names(screen)
+            try:
+                now = Path(desktop.get_wallpaper(screen.id)).name.lower()
+            except OSError:
+                now = ""
+            target = folder / (names[1] if now == names[0] else names[0])
+            image.save(target, "PNG", compress_level=1)
+            desktop.set_wallpaper(screen.id, str(target))
+            written.append(target)
+    return written
+
+
+def _restore_per_monitor(state: WallpaperState) -> None:
+    """原本每個螢幕的圖不一樣時,逐一設回去(做不到就維持 _set 設好的那一張)。"""
+    paths = {k: v for k, v in state.per_monitor.items() if v and Path(v).is_file()}
+    if len(set(paths.values())) < 2 and all(v == state.path for v in paths.values()):
+        return
+    try:
+        with screen_api.open_desktop_wallpaper() as desktop:
+            for monitor_id, path in paths.items():
+                if desktop.monitor_rect(monitor_id) is not None:
+                    desktop.set_wallpaper(monitor_id, path)
+    except OSError:
+        pass
+
+
 def restore() -> Optional[WallpaperState]:
     """還原成備份的桌布。沒有備份時回傳 None。"""
     state = load_backup()
@@ -141,6 +205,8 @@ def restore() -> Optional[WallpaperState]:
         backup = app_dir() / state.backup if state.backup else None
         path = str(backup) if backup and backup.is_file() else ""
     _set(path, state.style, state.tile)
+    if state.per_monitor:
+        _restore_per_monitor(state)
     try:
         state_path().unlink()
     except OSError:

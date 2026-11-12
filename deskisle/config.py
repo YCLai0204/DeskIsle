@@ -25,6 +25,7 @@ class Config:
     debounce: float = 0.5      # 排列穩定多久後才重畫(秒)
     pause_when_busy: bool = True  # 全螢幕程式執行或螢幕鎖定時暫停
     reseed_on_move: bool = True   # 跟隨時,圖示排列一改變就換一個種子(每次的海岸線都不同)
+    screens: Tuple[str, ...] = ()  # 要更新桌布的螢幕代碼;空 = 全部螢幕
 
     def validate(self) -> "Config":
         get_theme(self.theme)
@@ -34,6 +35,8 @@ class Config:
             raise ValueError("roughness、debounce、decorations 不可為負")
         if self.poll_interval < 0.1 or self.idle_interval < 0.1:
             raise ValueError("poll_interval 與 idle_interval 不可小於 0.1 秒")
+        if not isinstance(self.screens, tuple) or not all(isinstance(i, str) for i in self.screens):
+            raise ValueError("screens 必須是螢幕代碼(文字)的清單")
         return self
 
 
@@ -68,7 +71,11 @@ def load_config(path: Path = None) -> Tuple[Config, List[str]]:
             warnings.append(f"設定檔中有不認識的項目 '{key}',已忽略")
             continue
         try:
-            if known[key] is bool or isinstance(value, bool):
+            if known[key] is tuple:
+                if not isinstance(value, list):
+                    raise TypeError
+                values[key] = tuple(value)
+            elif known[key] is bool or isinstance(value, bool):
                 # 是/否 的項目只接受 true/false,其他項目不接受 true/false
                 if known[key] is not bool or not isinstance(value, bool):
                     raise TypeError

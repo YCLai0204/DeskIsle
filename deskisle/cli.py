@@ -69,6 +69,8 @@ def _cmd_icons(args) -> int:
     from .icons import read_layout
     layout = read_layout()
     print(f"畫面 {layout.width}x{layout.height},螢幕 {layout.monitors} 個,圖示 {len(layout.icons)} 個")
+    for number, screen in enumerate(layout.screen_list(), 1):
+        print(f"  {screen.describe(number)},位置 ({screen.left},{screen.top})")
     if not layout.icons_visible:
         print("桌面圖示目前是隱藏的。")
     for icon in layout.icons:
@@ -102,8 +104,10 @@ def _cmd_apply(args) -> int:
     from .watcher import apply_layout
     config = _load(args)
     layout = read_layout()
-    target = apply_layout(layout, config)
-    print(f"已套用桌布:{len(layout.icons)} 個圖示,主題 {config.theme}({target})")
+    targets = apply_layout(layout, config)
+    print(f"已套用桌布:{len(layout.icons)} 個圖示,主題 {config.theme}")
+    for target in targets:
+        print(f"  {target}")
     _print_backup_note()
     return 0
 
