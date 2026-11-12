@@ -40,27 +40,19 @@ from ..system import autostart, read_layout, wallpaper
 from ..watcher import (Watcher, WatchStatus, apply_layout, current_hour, effective_config, is_night, look_key,
                        render_layout)
 from . import style, tray
+from .images import ImagesPage
 from .preview import fit_width, render_preview, render_preview_image
 from .widgets import (Button, Card, Divider, Dropdown, Kit, NavItem, Pill, ScreenTile, ScrollArea, Segmented,
                       Slider, ThemeTile, Toggle, apply_palette, label, to_photo)
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
-LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations", "image_mode", "file_decor")
-IMAGE_MODE_OPTIONS = (("off", "不使用"), ("land", "當陸地"), ("water", "當海"), ("colors", "取色"))
-IMAGE_MODE_HINTS = {
-    "off": "選好圖片後,可以當成島嶼的陸地、當成海,或只拿它的顏色。",
-    "land": "圖示周圍的島嶼會鋪上你的圖片,島外是「{theme}」主題的海。",
-    "water": "你的圖片鋪滿整個背景當成海,圖示底下長出「{theme}」主題的小島。",
-    "colors": "用圖片裡的顏色重新上色「{theme}」主題;質感、浪花與裝飾物照舊。",
-}
+LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations", "file_decor")
 STATE_TEXT = {"following": "跟隨中", "paused": "暫停中", "error": "發生問題", "stopped": "未啟動"}
 
-# 版面尺寸(以 100% 縮放為準)
-SIDEBAR_WIDTH = 212
-SETTINGS_WIDTH = 408
-PREVIEW_SIZE = (480, 300)
-TEXT_WRAP = SETTINGS_WIDTH - 40
+# 版面尺寸(以 100% 縮放為準),定義在 style.py
+SIDEBAR_WIDTH, SETTINGS_WIDTH, PREVIEW_SIZE, TEXT_WRAP = (
+    style.SIDEBAR_WIDTH, style.SETTINGS_WIDTH, style.PREVIEW_SIZE, style.TEXT_WRAP)
 
 
 APPEARANCE_OPTIONS = (("system", "跟隨系統"), ("light", "淺色"), ("dark", "深色"))
@@ -174,7 +166,6 @@ class App:
         self.var_autostart, self.var_reseed = tk.BooleanVar(), tk.BooleanVar()
         self.var_poll, self.var_idle, self.var_debounce = tk.DoubleVar(), tk.DoubleVar(), tk.DoubleVar()
         self.var_appearance = tk.StringVar(value=self.applied.appearance)
-        self.var_image, self.var_image_mode = tk.StringVar(), tk.StringVar(value="off")
         self.var_file_decor = tk.BooleanVar(value=True)
         self.var_night = tk.BooleanVar()
         self.var_night_theme = tk.StringVar(value="night")
@@ -203,6 +194,7 @@ class App:
         self._nav: Dict[str, NavItem] = {}
         self.current_page = ""
         self._build_look_page()
+        self.images = ImagesPage(self)
         self._build_screens_page()
         self._build_behavior_page()
         self.has_test_page = False
@@ -403,7 +395,7 @@ class App:
     def _build_look_page(self) -> None:
         kit = self.kit
         p, px = kit.p, kit.px
-        page = self.add_page("外觀", "look", "挑一個主題,調整海岸線的樣子;右邊的預覽會跟著變。")
+        page = self.add_page("外觀", "palette", "挑一個主題,調整海岸線的樣子;右邊的預覽會跟著變。")
 
         self._theme_names = {f"{t.label}({t.key})": t.key for t in THEMES.values()}
         self.section(page, "主題")
@@ -421,8 +413,6 @@ class App:
             self._theme_tiles[theme.key] = tile
         self.theme_hint = label(body, kit, font="caption", color=p.muted, wrap=TEXT_WRAP - 20)
         self.theme_hint.pack(fill="x", padx=px(4), pady=(px(6), 0))
-
-        self._build_image_section(page)
 
         self.section(page, "海岸線")
         body = self.card(page)
@@ -455,95 +445,6 @@ class App:
 
         Button(page, kit, "恢復預設外觀", self._reset_look, icon="restore", small=True).pack(
             anchor="w", pady=(px(18), px(6)))
-
-    def _build_image_section(self, page: tk.Frame) -> None:
-        """「自訂圖片」:縮圖、選擇/移除、用法(當陸地/當海/取色)。"""
-        kit = self.kit
-        p, px = kit.p, kit.px
-        self.section(page, "自訂圖片")
-        body = self.card(page)
-        line = tk.Frame(body, background=p.card)
-        line.pack(fill="x", padx=px(14), pady=px(12))
-        self._image_thumb_size = (px(104), px(66))
-        self.image_thumb = tk.Canvas(line, width=self._image_thumb_size[0], height=self._image_thumb_size[1],
-                                     background=p.card, highlightthickness=0, borderwidth=0)
-        self.image_thumb.grid(row=0, column=0, rowspan=3, sticky="w")
-        self._image_thumb_key = None
-        label(line, kit, "你的圖片").grid(row=0, column=1, sticky="w", padx=(px(14), 0))
-        self.image_caption = label(line, kit, font="caption", color=p.muted)
-        self.image_caption.grid(row=1, column=1, sticky="w", padx=(px(14), 0), pady=(px(2), 0))
-        buttons = tk.Frame(line, background=p.card)
-        buttons.grid(row=2, column=1, sticky="w", padx=(px(14), 0), pady=(px(8), 0))
-        Button(buttons, kit, "選擇圖片…", self._choose_image, icon="look", small=True).pack(side="left")
-        self.image_remove = Button(buttons, kit, "移除", self._remove_image, kind="danger", small=True)
-        self.image_remove.pack(side="left", padx=(px(6), 0))
-
-        control = self.segmented_row(body, "用法", "", IMAGE_MODE_OPTIONS, self.var_image_mode,
-                                     self._image_mode_changed)
-        self.image_mode_hint = label(control.master, kit, font="caption", color=p.muted, wrap=TEXT_WRAP - 30)
-        self.image_mode_hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(px(8), 0))
-
-    def _refresh_image_card(self) -> None:
-        kit = self.kit
-        p = kit.p
-        path, mode = self.var_image.get(), self.var_image_mode.get()
-        picture = photo.load(path)
-        width, height = self._image_thumb_size
-        key = (path, picture is not None)
-        if key != self._image_thumb_key:
-            self._image_thumb_key = key
-            canvas = self.image_thumb
-            canvas.delete("all")
-            if picture is not None:
-                self._image_thumb_photo = to_photo(style.rounded(photo.thumbnail(picture, width, height), kit.px(8)),
-                                                   self.root)
-                canvas.create_image(0, 0, anchor="nw", image=self._image_thumb_photo)
-            else:
-                kit.draw_box(canvas, 0, 0, width, height, kit.px(8), p.field, p.border)
-                canvas.create_image(width / 2, height / 2, image=kit.icon("look", kit.px(22), p.subtle))
-        if picture is not None:
-            caption = f"{picture.width} × {picture.height}"
-        elif path:
-            caption = "找不到圖片檔案,請重新選擇"
-        else:
-            caption = "還沒有選擇圖片"
-        self.image_caption.configure(text=caption)
-        self.image_remove.set_enabled(bool(path))
-        theme = get_theme(self._theme_key()).label
-        self.image_mode_hint.configure(text=IMAGE_MODE_HINTS.get(mode, "").format(theme=theme))
-
-    def _choose_image(self) -> bool:
-        """請使用者挑一張圖片,複製一份到程式的資料夾。挑好回傳 True。"""
-        path = filedialog.askopenfilename(
-            parent=self.root, title="選擇圖片",
-            filetypes=[("圖片", " ".join(photo.IMAGE_TYPES)), ("所有檔案", "*.*")])
-        if not path:
-            return False
-        self.root.configure(cursor="watch")
-        self.root.update_idletasks()
-        try:
-            target = photo.import_image(path, app_dir() / "images")
-        except (ValueError, OSError) as exc:
-            messagebox.showerror(APP_NAME, str(exc), parent=self.root)
-            return False
-        finally:
-            self.root.configure(cursor="")
-        self.var_image.set(str(target))
-        if self.var_image_mode.get() == "off":
-            self.var_image_mode.set("land")      # 選了圖片通常就是要用它
-        self._look_changed()
-        return True
-
-    def _image_mode_changed(self) -> None:
-        if self.var_image_mode.get() != "off" and photo.load(self.var_image.get()) is None:
-            if not self._choose_image():
-                self.var_image_mode.set("off")   # 沒選圖片就維持「不使用」
-        self._look_changed()
-
-    def _remove_image(self) -> None:
-        self.var_image.set("")
-        self.var_image_mode.set("off")
-        self._look_changed()
 
     def _choose_theme(self, key: str) -> None:
         for name, value in self._theme_names.items():
@@ -606,7 +507,7 @@ class App:
         elif len(screens) == 1:
             hint = "目前只偵測到一個螢幕。接上更多螢幕後,這裡可以分別選擇。"
         elif choosable:
-            #   是不換行空白:tkinter 會優先在一般空白處換行,一行會斷得太早
+            # \u00a0 是不換行空白:tkinter 會優先在一般空白處換行,一行會斷得太早
             hint = "預覽中每個螢幕左上角的編號,就是這裡的「螢幕\u00a0N」;沒選的螢幕在預覽裡是灰色斜線。"
         else:
             hint = "這台電腦無法各自設定每個螢幕,會把所有螢幕畫成一張圖。"
@@ -720,8 +621,7 @@ class App:
         self.var_idle.set(config.idle_interval)
         self.var_debounce.set(config.debounce)
         self.var_appearance.set(config.appearance)
-        self.var_image.set(config.image)
-        self.var_image_mode.set(config.image_mode)
+        self.images.load(config)
         self.var_file_decor.set(config.file_decor)
         self.var_night.set(config.night_mode)
         self.var_night_theme.set(config.night_theme)
@@ -739,7 +639,7 @@ class App:
         self.theme_hint.configure(text=get_theme(self._theme_key()).description)
         self._refresh_night_hint()
         self._refresh_theme_tiles()
-        self._refresh_image_card()
+        self.images.refresh()
         pairs = [f"{KIND_LABELS[kind]} → {DECOR_LABELS.get(rule.kind, rule.kind)}"
                  for kind, rule in get_theme(self._theme_key()).companions]
         self.file_decor_hint.configure(text="、".join(pairs))
@@ -770,8 +670,7 @@ class App:
             reseed_on_move=bool(self.var_reseed.get()),
             screens=self._screen_choice,
             appearance=self.var_appearance.get(),
-            image=self.var_image.get(),
-            image_mode=self.var_image_mode.get(),
+            **self.images.values(),
             file_decor=bool(self.var_file_decor.get()),
             night_mode=bool(self.var_night.get()),
             night_theme=self.var_night_theme.get(),
@@ -835,7 +734,6 @@ class App:
         self._style_title_bar()
         # 少數用配色畫成圖片的地方,依新配色再畫一次
         self._set_header_state(*self._header_state)
-        self._image_thumb_key = None
         self._refresh_labels()
         if self._photo is None:
             self._draw_preview_placeholder("正在產生預覽…")
@@ -1038,8 +936,9 @@ class App:
                 info += f" · {screens[0].width} × {screens[0].height}"
             if not layout.icons_visible:
                 info += " · 桌面圖示目前是隱藏的"
-            if config.image_mode != "off" and photo.load(config.image) is None:
-                info += " · 找不到自訂圖片,先用一般主題"
+            missing = self.images.missing(config)
+            if missing:
+                info += f" · 找不到{'、'.join(missing)}的圖片檔案"
             if effective_config(config).theme != config.theme:
                 info += f" · 現在是晚上,桌布會用「{get_theme(config.night_theme).label}」"
             self._ui(self._preview_done, buffer.getvalue(), "", None if override else layout.screens, info)

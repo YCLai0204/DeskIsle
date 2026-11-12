@@ -697,6 +697,52 @@ class ThemeTile(_CanvasWidget):
 
 
 # ---------------------------------------------------------------------------
+class ObjectTile(_CanvasWidget):
+    """「小物件」的一格:image 是小物件的圖(滑過時出現刪除的 ×,點一下刪除);
+    image=None 是「新增」那一格(+)。"""
+
+    def __init__(self, parent, kit: Kit, image: Optional[Image.Image], command: Callable, size: int,
+                 bg: Optional[str] = None):
+        super().__init__(parent, kit, bg, width=size, height=size, cursor="hand2", takefocus=1)
+        self.command, self.size, self.adding = command, size, image is None
+        self._photo = None
+        if image is not None:
+            inner = size - kit.px(14)
+            self._photo = to_photo(style.contain(image, inner, inner), kit.root)
+        for sequence, handler in (("<Enter>", self._enter), ("<Leave>", self._leave),
+                                  ("<ButtonRelease-1>", self._click), ("<KeyPress-space>", self._click)):
+            self.bind(sequence, handler)
+        self._paint()
+
+    def _paint(self) -> None:
+        p, kit, px = self.kit.p, self.kit, self.kit.px
+        self.delete("all")
+        size = self.size
+        outline = (p.accent if self.adding else p.border_strong) if self.hover else p.border
+        kit.draw_box(self, 0, 0, size, size, px(10), p.field, outline)
+        if self.adding:
+            self.create_image(size / 2, size / 2, image=kit.icon("plus", px(22), p.accent if self.hover else p.muted))
+            return
+        self.create_image(size / 2, size / 2, image=self._photo)
+        if self.hover:
+            badge = px(20)
+            self.create_image(size - px(4), px(4), anchor="ne", image=kit.circle(badge, p.danger))
+            self.create_image(size - px(4) - badge / 2, px(4) + badge / 2,
+                              image=kit.icon("close", px(12), p.card))
+
+    def _click(self, _event=None) -> None:
+        self.command()
+
+    def _enter(self, _event) -> None:
+        self.hover = True
+        self._paint()
+
+    def _leave(self, _event) -> None:
+        self.hover = False
+        self._paint()
+
+
+# ---------------------------------------------------------------------------
 class ScreenTile(_CanvasWidget):
     """一個螢幕的選擇卡:依比例畫的螢幕形狀(直向就是直的)+ 編號、名稱、解析度,右上角打勾。"""
 
@@ -843,7 +889,7 @@ class ScrollArea(tk.Frame):
         self.bar.bind("<B1-Motion>", self._bar_drag)
         # 滾輪事件掛在整個程式上,再看滑鼠是不是在這個區域裡
         # (Enter/Leave 在滑進子元件時也會觸發,不可靠)。
-        # 用取代而不是附加:介面重建時,新的捲動區會蓋掉舊的(舊的已經不存在)。
+        # 用取代而不是附加:同一時間只有一個捲動區,不會重複綁定。
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.bind_all(sequence, self._wheel)
 

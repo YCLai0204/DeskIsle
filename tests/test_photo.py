@@ -1,7 +1,8 @@
-"""使用者的圖片:匯入、裁切、當陸地/當海、取色。任何作業系統都能跑。
+"""「圖片」頁:海洋與陸地的照片/取色、小物件、舊設定檔的轉換。任何作業系統都能跑。
 
 執行:python -m unittest discover -s tests -v
 """
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,13 +10,24 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from deskisle.config import Config
-from deskisle.engine import photo
-from deskisle.engine.render import render
+from deskisle.config import Config, load_config
+from deskisle.engine import decor, photo
+from deskisle.engine.render import object_rules, render
+from deskisle.engine.terrain import shore_field
 from deskisle.engine.themes import get_theme
 
 MAGENTA = (250, 0, 250)
+GREEN = (0, 220, 60)
 RECT = [(140, 90, 180, 130)]           # 一個圖示在中間;陸地在它周圍,畫面邊緣是海
+LAND_POINT, SEA_POINT = (160, 110), (5, 5)
+
+
+def _close(color, target, tolerance=40):
+    return all(abs(a - b) <= tolerance for a, b in zip(color, target))
+
+
+def _layer(color):
+    return np.full((220, 320, 3), color, dtype=np.float32)
 
 
 class ImportTests(unittest.TestCase):
@@ -25,16 +37,37 @@ class ImportTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         photo.clear_cache()
 
-    def test_import_makes_an_rgb_copy_named_by_content(self):
+    def test_background_import_makes_an_rgb_copy_named_by_content(self):
         source = self.root / "透明.png"
         Image.new("RGBA", (40, 20), (255, 0, 0, 0)).save(source)
         first = photo.import_image(source, self.root / "images")
-        second = photo.import_image(source, self.root / "images")
-        self.assertEqual(first, second)                          # 同一張圖只存一份
-        source.unlink()                                          # 原檔不見也沒關係
+        self.assertEqual(first, photo.import_image(source, self.root / "images"))   # 同一張圖只存一份
+        source.unlink()                                                              # 原檔不見也沒關係
         image = photo.load(str(first))
         self.assertEqual((image.mode, image.size), ("RGB", (40, 20)))
-        self.assertGreater(min(image.getpixel((5, 5))), 240)     # 透明的地方墊白色
+        self.assertGreater(min(image.getpixel((5, 5))), 240)                        # 透明的地方墊白色
+
+    def test_object_import_keeps_transparency_and_trims_empty_edges(self):
+        source = self.root / "星球.png"
+        image = Image.new("RGBA", (100, 80), (0, 0, 0, 0))
+        image.paste((200, 100, 50, 255), (30, 20, 60, 50))
+        image.save(source)
+        target = photo.import_object(source, self.root / "objects")
+        self.assertEqual(target.suffix, ".png")
+        loaded = photo.load_object(str(target))
+        self.assertEqual((loaded.mode, loaded.size), ("RGBA", (30, 30)))
+
+    def test_fully_transparent_or_broken_files_are_rejected(self):
+        empty = self.root / "空.png"
+        Image.new("RGBA", (10, 10), (0, 0, 0, 0)).save(empty)
+        broken = self.root / "壞掉.jpg"
+        broken.write_bytes(b"not an image")
+        with self.assertRaises(ValueError):
+            photo.import_object(empty, self.root / "objects")
+        with self.assertRaises(ValueError):
+            photo.import_image(broken, self.root / "images")
+        self.assertIsNone(photo.load(str(broken)))
+        self.assertIsNone(photo.load(""))
 
     def test_only_the_newest_images_are_kept(self):
         folder = self.root / "images"
@@ -44,24 +77,14 @@ class ImportTests(unittest.TestCase):
             photo.import_image(source, folder)
         self.assertEqual(len(list(folder.glob("custom_*.jpg"))), photo.KEEP_IMAGES)
 
-    def test_broken_or_missing_files(self):
-        broken = self.root / "壞掉.jpg"
-        broken.write_bytes(b"not an image")
-        with self.assertRaises(ValueError):
-            photo.import_image(broken, self.root / "images")
-        self.assertIsNone(photo.load(str(broken)))
-        self.assertIsNone(photo.load(str(self.root / "沒有這個檔案.jpg")))
-        self.assertIsNone(photo.load(""))
 
-
-class CoverTests(unittest.TestCase):
+class ShapeTests(unittest.TestCase):
     def test_cover_fills_and_crops_the_middle(self):
         image = Image.new("RGB", (300, 100), (255, 0, 0))
         image.paste((0, 0, 255), (100, 0, 200, 100))             # 中間三分之一是藍色
         layer = photo.cover(image, 50, 50)
         self.assertEqual(layer.shape, (50, 50, 3))
         self.assertEqual(tuple(layer[25, 25].astype(int)), (0, 0, 255))
-
 
     def test_cover_never_fails_on_rounding(self):
         # 3840×2400 縮到預覽大小時,浮點誤差曾讓裁切框變成負數而出錯
@@ -70,59 +93,131 @@ class CoverTests(unittest.TestCase):
             for height in (56, 135, 281, 401):
                 self.assertEqual(photo.cover(image, width, height).shape, (height, width, 3))
 
+    def test_circle_shape_cuts_a_round_square(self):
+        image = Image.new("RGBA", (80, 40), (10, 20, 30, 255))
+        round_ = photo.shape_object(image, "circle")
+        self.assertEqual(round_.size, (40, 40))
+        self.assertEqual(round_.getpixel((0, 0))[3], 0)            # 角落透明
+        self.assertEqual(round_.getpixel((20, 20))[3], 255)        # 中間不透明
+        self.assertIs(photo.shape_object(image, "original"), image)
+
 
 class CompositeTests(unittest.TestCase):
-    def _render(self, mode):
-        layer = np.full((220, 320, 3), MAGENTA, dtype=np.float32)
-        return render(320, 220, RECT, get_theme("beach"), seed=3, decorations=0,
-                      photo=layer, photo_mode=mode)
+    def _render(self, **layers):
+        return render(320, 220, RECT, get_theme("beach"), seed=3, decorations=0, **layers)
 
-    @staticmethod
-    def _close(color, target, tolerance=40):
-        return all(abs(a - b) <= tolerance for a, b in zip(color, target))
+    def test_land_photo_goes_on_the_islands(self):
+        image = self._render(land_photo=_layer(MAGENTA))
+        self.assertTrue(_close(image.getpixel(LAND_POINT), MAGENTA))
+        self.assertFalse(_close(image.getpixel(SEA_POINT), MAGENTA))
 
-    def test_land_mode_puts_the_picture_on_the_islands(self):
-        image = self._render("land")
-        self.assertTrue(self._close(image.getpixel((160, 110)), MAGENTA))   # 圖示底下(陸地中央)
-        self.assertFalse(self._close(image.getpixel((5, 5)), MAGENTA))      # 遠處的海
+    def test_water_photo_goes_in_the_sea(self):
+        image = self._render(water_photo=_layer(MAGENTA))
+        self.assertTrue(_close(image.getpixel(SEA_POINT), MAGENTA, 70))
+        self.assertFalse(_close(image.getpixel(LAND_POINT), MAGENTA))
 
-    def test_water_mode_puts_the_picture_in_the_sea(self):
-        image = self._render("water")
-        self.assertTrue(self._close(image.getpixel((5, 5)), MAGENTA, 70))
-        self.assertFalse(self._close(image.getpixel((160, 110)), MAGENTA))
+    def test_land_and_sea_can_be_used_together(self):
+        image = self._render(land_photo=_layer(GREEN), water_photo=_layer(MAGENTA))
+        self.assertTrue(_close(image.getpixel(LAND_POINT), GREEN))
+        self.assertTrue(_close(image.getpixel(SEA_POINT), MAGENTA, 70))
 
-    def test_without_a_mode_the_picture_is_ignored(self):
+    def test_without_photos_nothing_changes(self):
         plain = render(320, 220, RECT, get_theme("beach"), seed=3, decorations=0)
-        self.assertEqual(self._render("").tobytes(), plain.tobytes())
+        self.assertEqual(self._render().tobytes(), plain.tobytes())
 
 
 class RecolorTests(unittest.TestCase):
-    def test_theme_takes_the_picture_colours_but_keeps_its_light_and_dark(self):
-        image = Image.new("RGB", (60, 60), (30, 10, 90))         # 深紫
-        image.paste((240, 200, 60), (0, 0, 60, 30))              # 上半部是亮黃
-        beach = get_theme("beach")
-        colored = photo.recolor(beach, image)
-        self.assertEqual([d for d, _c in colored.stops], [d for d, _c in beach.stops])
+    def setUp(self):
+        self.beach = get_theme("beach")
+        self.purple = Image.new("RGB", (60, 60), (30, 10, 90))
+        self.purple.paste((180, 140, 240), (0, 0, 60, 30))
+        self.yellow = Image.new("RGB", (60, 60), (240, 200, 60))
+        self.yellow.paste((120, 90, 20), (0, 0, 60, 30))
+
+    def test_land_and_water_are_recoloured_separately(self):
+        both = photo.recolor(self.beach, land=self.yellow, water=self.purple)
+        self.assertEqual([d for d, _c in both.stops], [d for d, _c in self.beach.stops])
+        for distance, color in both.stops:
+            if distance <= 0:
+                self.assertGreater(color[0], color[2], distance)    # 陸地:黃色系(紅 > 藍)
+            else:
+                self.assertGreater(color[2], color[0], distance)    # 海:紫色系(藍 > 紅)
+
+    def test_only_land_keeps_the_original_sea(self):
+        land_only = photo.recolor(self.beach, land=self.yellow)
+        self.assertEqual([c for d, c in land_only.stops if d > 0], [c for d, c in self.beach.stops if d > 0])
+        self.assertEqual(land_only.foam, self.beach.foam)
+        water_only = photo.recolor(self.beach, water=self.purple)
+        self.assertEqual([c for d, c in water_only.stops if d <= 0], [c for d, c in self.beach.stops if d <= 0])
+        self.assertNotEqual(water_only.foam, self.beach.foam)       # 浪花跟著海換色
+        self.assertEqual(water_only.decor, self.beach.decor)
+
+    def test_light_and_dark_structure_is_kept(self):
+        recoloured = photo.recolor(self.beach, land=self.purple, water=self.purple)
 
         def lum(c):
             return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
-        original = [lum(c) for _d, c in beach.stops]
-        new = [lum(c) for _d, c in colored.stops]
-        darkest, brightest = original.index(min(original)), original.index(max(original))
-        self.assertLess(new[darkest], new[brightest])            # 明暗結構不變
-        dark, bright = colored.stops[darkest][1], colored.stops[brightest][1]
-        self.assertGreater(dark[2], dark[0])                     # 最暗的位置是紫色系(藍 > 紅)
-        self.assertGreater(bright[0], bright[2])                 # 最亮的位置是黃色系(紅 > 藍)
-        self.assertEqual(colored.decor, beach.decor)
+        original = [lum(c) for _d, c in self.beach.stops]
+        new = [lum(c) for _d, c in recoloured.stops]
+        self.assertLess(new[original.index(min(original))], new[original.index(max(original))])
 
     def test_solid_picture_still_gives_a_range_of_shades(self):
         colors = photo.palette(Image.new("RGB", (20, 20), (90, 140, 90)))
         self.assertGreater(0.299 * colors[-1][0] - 0.299 * colors[0][0], 20)
 
-    def test_config_accepts_only_known_modes(self):
-        Config(image_mode="water").validate()
-        with self.assertRaises(ValueError):
-            Config(image_mode="sky").validate()
+
+class ObjectTests(unittest.TestCase):
+    def setUp(self):
+        self.sprite = Image.new("RGBA", (40, 40), (255, 0, 255, 255))
+        self.field = shore_field(640, 360, RECT, margin=46.0, blend=26.0, roughness=22.0, seed=7)
+
+    def test_objects_stay_in_their_zone(self):
+        for zone, check in (("water", lambda s: s >= 40), ("land", lambda s: s < -16)):
+            placed = decor.place(self.field, RECT, object_rules(2, zone, 3.0, 40), seed=1)
+            self.assertTrue(all(check(self.field[p.y, p.x]) for p in placed), zone)
+        self.assertGreater(len(decor.place(self.field, RECT, object_rules(2, "water", 3.0, 40), seed=1)), 0)
+
+    def test_more_objects_with_a_higher_amount_and_none_at_zero(self):
+        few = decor.place(self.field, RECT, object_rules(1, "water", 0.5, 30), seed=1)
+        many = decor.place(self.field, RECT, object_rules(1, "water", 3.0, 30), seed=1)
+        self.assertLess(len(few), len(many))
+        plain = render(640, 360, RECT, get_theme("beach"), seed=3, decorations=0)
+        none = render(640, 360, RECT, get_theme("beach"), seed=3, decorations=0, objects=[self.sprite],
+                      objects_amount=0)
+        self.assertEqual(plain.tobytes(), none.tobytes())
+
+    def test_objects_are_drawn_even_without_decorations(self):
+        image = render(640, 360, RECT, get_theme("beach"), seed=3, decorations=0, objects=[self.sprite],
+                       objects_amount=3.0, objects_size=40)
+        pixels = np.asarray(image).reshape(-1, 3)
+        self.assertTrue(np.any((pixels[:, 0] > 240) & (pixels[:, 1] < 20) & (pixels[:, 2] > 240)))
+
+
+class ConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "config.json"
+
+    def test_only_known_values_are_accepted(self):
+        Config(water_mode="photo", land_mode="colors", objects=("a.png",), objects_zone="both").validate()
+        for bad in (dict(water_mode="sky"), dict(land_mode="land"), dict(objects_zone="air"),
+                    dict(objects_shape="star"), dict(objects_size=0), dict(objects_amount=-1)):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                Config(**bad).validate()
+
+    def test_old_single_image_settings_are_converted(self):
+        for mode, expected in (("water", dict(water_mode="photo", land_mode="off")),
+                               ("land", dict(water_mode="off", land_mode="photo")),
+                               ("colors", dict(water_mode="colors", land_mode="colors"))):
+            self.path.write_text(json.dumps({"image": "C:/pic.jpg", "image_mode": mode}), encoding="utf-8")
+            config, warnings = load_config(self.path)
+            self.assertEqual(warnings, [])
+            self.assertEqual({k: getattr(config, k) for k in expected}, expected, mode)
+            if expected["water_mode"] != "off":
+                self.assertEqual(config.water_image, "C:/pic.jpg")
+        self.path.write_text(json.dumps({"image": "", "image_mode": "off"}), encoding="utf-8")
+        self.assertEqual(load_config(self.path)[0], Config())
 
 
 if __name__ == "__main__":

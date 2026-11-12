@@ -10,6 +10,7 @@ from typing import List, Tuple
 
 from . import APP_NAME
 from .engine.photo import MODES as IMAGE_MODES
+from .engine.photo import OBJECT_SHAPES, OBJECT_ZONES
 from .engine.themes import DEFAULT_THEME, get_theme
 
 
@@ -32,8 +33,15 @@ class Config:
     reseed_on_move: bool = True   # 跟隨時,圖示排列一改變就換一個種子(每次的海岸線都不同)
     screens: Tuple[str, ...] = ()  # 要更新桌布的螢幕代碼;空 = 全部螢幕
     appearance: str = "system"     # 介面配色:system(跟隨系統)/ light / dark
-    image: str = ""                # 使用者的圖片(匯入到 app_dir()/images 的那一份)
-    image_mode: str = "off"        # 圖片的用法:off / land(當陸地)/ water(當海)/ colors(取色)
+    water_image: str = ""          # 海洋用的圖片(匯入到 app_dir()/images 的那一份)
+    water_mode: str = "off"        # 海洋的用法:off / photo(照片)/ colors(取色)
+    land_image: str = ""           # 陸地用的圖片
+    land_mode: str = "off"         # 陸地的用法:off / photo / colors
+    objects: Tuple[str, ...] = ()  # 小物件(匯入到 app_dir()/objects 的圖片)
+    objects_zone: str = "water"    # 小物件放哪裡:water(海上)/ land(陸地)/ both
+    objects_amount: float = 1.0    # 小物件數量倍率(0 = 不放)
+    objects_size: float = 64.0     # 小物件大小(100% 縮放下的像素)
+    objects_shape: str = "original"  # original(原樣)/ circle(裁成圓形)
     file_decor: bool = True        # 依檔案類型在圖示旁邊放裝飾物(資料夾 → 椰子樹……)
     night_mode: bool = False       # 晚上自動換成另一個主題
     night_theme: str = "night"     # 晚上用的主題
@@ -53,8 +61,15 @@ class Config:
         get_theme(self.night_theme)
         if not (0 <= self.night_start <= 23 and 0 <= self.day_start <= 23):
             raise ValueError("night_start 與 day_start 必須是 0~23 點")
-        if self.image_mode not in IMAGE_MODES:
-            raise ValueError(f"image_mode 必須是 {'、'.join(IMAGE_MODES)} 其中之一")
+        for name in ("water_mode", "land_mode"):
+            if getattr(self, name) not in IMAGE_MODES:
+                raise ValueError(f"{name} 必須是 {'、'.join(IMAGE_MODES)} 其中之一")
+        if self.objects_zone not in OBJECT_ZONES or self.objects_shape not in OBJECT_SHAPES:
+            raise ValueError("objects_zone 或 objects_shape 的值不對")
+        if not isinstance(self.objects, tuple) or not all(isinstance(i, str) for i in self.objects):
+            raise ValueError("objects 必須是圖片路徑(文字)的清單")
+        if self.objects_amount < 0 or self.objects_size <= 0:
+            raise ValueError("objects_amount 不可為負,objects_size 必須大於 0")
         if self.appearance not in APPEARANCES:
             raise ValueError(f"appearance 必須是 {'、'.join(APPEARANCES)} 其中之一")
         return self
@@ -88,6 +103,7 @@ def load_config(path: Path = None) -> Tuple[Config, List[str]]:
     except (OSError, ValueError) as exc:
         raise ValueError(f"設定檔 {path} 讀取失敗:{exc}") from exc
 
+    _migrate(data)
     defaults = Config()
     known = {f.name: type(getattr(defaults, f.name)) for f in fields(Config)}
     values = {}
@@ -110,6 +126,25 @@ def load_config(path: Path = None) -> Tuple[Config, List[str]]:
         except (TypeError, ValueError):
             raise ValueError(f"設定檔項目 '{key}' 的值 {value!r} 格式不對") from None
     return replace(defaults, **values).validate(), warnings
+
+
+def _migrate(data: dict) -> None:
+    """舊版設定檔換成新的項目名稱(直接修改 data)。
+
+    0.0.11 只有一張圖片:image + image_mode(land / water / colors)。
+    0.0.16 起海洋、陸地各自一張:land → 陸地照片、water → 海洋照片、colors → 海洋與陸地都取色。
+    """
+    if "image" not in data and "image_mode" not in data:
+        return
+    image, mode = data.pop("image", ""), data.pop("image_mode", "off")
+    if not isinstance(image, str) or not image or mode not in ("land", "water", "colors"):
+        return
+    if mode in ("water", "colors"):
+        data.setdefault("water_image", image)
+        data.setdefault("water_mode", "photo" if mode == "water" else "colors")
+    if mode in ("land", "colors"):
+        data.setdefault("land_image", image)
+        data.setdefault("land_mode", "photo" if mode == "land" else "colors")
 
 
 def save_config(config: Config, path: Path = None) -> Path:

@@ -52,9 +52,19 @@ def effective_config(config: Config, hour: Optional[int] = None) -> Config:
 def resolve_theme(config: Config) -> Theme:
     """實際要用的主題:選「從圖片取色」時,是用圖片顏色重新上色過的版本。"""
     theme = get_theme(config.theme)
-    if config.image_mode == "colors":
-        theme = photo.recolored(theme, config.image)
+    land = config.land_image if config.land_mode == "colors" else ""
+    water = config.water_image if config.water_mode == "colors" else ""
+    if land or water:
+        theme = photo.recolored(theme, land, water)
     return theme
+
+
+def _photo_layer(path: str, mode: str, width: int, height: int):
+    """「照片」用法的圖片,裁成這個螢幕的大小;沒有用或圖片不見了回傳 None(照一般主題畫)。"""
+    if mode != "photo":
+        return None
+    picture = photo.load(path)
+    return None if picture is None else photo.cover(picture, width, height)
 
 
 def file_kinds(layout: DesktopLayout) -> list:
@@ -84,17 +94,16 @@ def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: floa
     if config.file_decor and config.decorations > 0:
         kinds = file_kinds(layout)
         tags = [kinds[i] for _rect, i in icons]
-    layer = None
-    if config.image_mode in ("land", "water"):
-        picture = photo.load(config.image)
-        if picture is not None:          # 圖片不見了就照一般主題畫
-            layer = photo.cover(picture, width, height)   # 每個螢幕各自裁切
     return render(
         width, height, [rect for rect, _i in icons], resolve_theme(config),
         margin=config.margin, blend=config.blend, roughness=config.roughness,
         seed=config.seed + 1013 * index, scale=system.ui_scale() * ratio,
         decorations=config.decorations, debug=debug,
-        photo=layer, photo_mode=config.image_mode if layer is not None else "", tags=tags,
+        tags=tags,
+        land_photo=_photo_layer(config.land_image, config.land_mode, width, height),   # 每個螢幕各自裁切
+        water_photo=_photo_layer(config.water_image, config.water_mode, width, height),
+        objects=photo.object_sprites(config.objects, config.objects_shape) if config.objects_amount > 0 else (),
+        objects_zone=config.objects_zone, objects_amount=config.objects_amount, objects_size=config.objects_size,
     )
 
 
@@ -136,7 +145,9 @@ def new_seed(old: int) -> int:
 def look_key(config: Config) -> tuple:
     """設定中會影響畫面的部分;這些一變就要重畫。"""
     return (config.theme, config.seed, config.margin, config.blend, config.roughness,
-            config.decorations, config.screens, config.image, config.image_mode, config.file_decor)
+            config.decorations, config.screens, config.file_decor, config.water_image, config.water_mode,
+            config.land_image, config.land_mode, config.objects, config.objects_zone, config.objects_amount,
+            config.objects_size, config.objects_shape)
 
 
 class LayoutDebouncer:

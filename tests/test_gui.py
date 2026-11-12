@@ -42,14 +42,14 @@ class GuiTests(unittest.TestCase):
 
     def test_source_build_has_the_test_page(self):
         app, _ = self._make_app()
-        self.assertEqual(app.page_names(), ["外觀", "螢幕", "運作", "測試"])
+        self.assertEqual(app.page_names(), ["外觀", "圖片", "螢幕", "運作", "測試"])
         self.assertTrue(app.has_test_page)
 
     def test_packaged_build_has_no_test_page(self):
         from deskisle.ui import app as gui
         with mock.patch.object(gui, "is_frozen", lambda: True):
             app, _ = self._make_app()
-        self.assertEqual(app.page_names(), ["外觀", "螢幕", "運作"])
+        self.assertEqual(app.page_names(), ["外觀", "圖片", "螢幕", "運作"])
         self.assertFalse(app.has_test_page)
 
     def test_switching_pages_shows_one_page_and_selects_its_nav_item(self):
@@ -197,29 +197,58 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(clicks, [1])
 
     def test_choosing_a_mode_without_a_picture_asks_for_one(self):
-        from deskisle.ui import app as gui
+        from deskisle.ui import images
         app, _ = self._make_app()
-        with mock.patch.object(gui.filedialog, "askopenfilename", return_value="") as ask:
-            app.var_image_mode.set("water")
-            app._image_mode_changed()
+        with mock.patch.object(images.filedialog, "askopenfilename", return_value="") as ask:
+            app.images.var_mode["water"].set("photo")
+            app.images.mode_changed("water")
         ask.assert_called_once()
-        self.assertEqual(app.var_image_mode.get(), "off")        # 取消 → 維持不使用
+        self.assertEqual(app.images.var_mode["water"].get(), "off")   # 取消 → 維持不使用
 
-    def test_choosing_a_picture_copies_it_and_uses_it_as_land(self):
-        from deskisle.ui import app as gui
+    def test_land_and_sea_pictures_are_independent(self):
+        from deskisle.ui import images
         app, _ = self._make_app()
-        source = Path(self.tmp.name) / "我的照片.png"
-        Image.new("RGB", (64, 40), (200, 60, 30)).save(source)
-        with mock.patch.object(gui.filedialog, "askopenfilename", return_value=str(source)):
-            app._choose_image()
+        sea, land = Path(self.tmp.name) / "海.png", Path(self.tmp.name) / "陸.png"
+        Image.new("RGB", (64, 40), (20, 60, 200)).save(sea)
+        Image.new("RGB", (30, 50), (200, 160, 60)).save(land)
+        with mock.patch.object(images.filedialog, "askopenfilename", return_value=str(sea)):
+            app.images.choose("water")
+        with mock.patch.object(images.filedialog, "askopenfilename", return_value=str(land)):
+            app.images.choose("land")
         draft = app.draft_config()
-        self.assertEqual(draft.image_mode, "land")
-        self.assertEqual(Path(draft.image).parent.name, "images")
-        self.assertTrue(Path(draft.image).exists())
-        self.assertEqual(app.image_caption.cget("text"), "64 × 40")
+        self.assertEqual((draft.water_mode, draft.land_mode), ("photo", "colors"))   # 預設:海照片、陸地取色
+        self.assertNotEqual(draft.water_image, draft.land_image)
+        self.assertTrue(Path(draft.water_image).exists() and Path(draft.land_image).exists())
+        self.assertEqual(app.images.water_widgets["caption"].cget("text"), "64 × 40")
         self.assertEqual(app.pending_pill.text, "尚未套用")
-        app._remove_image()
-        self.assertEqual((app.draft_config().image, app.draft_config().image_mode), ("", "off"))
+        app.images.var_mode["land"].set("photo")
+        app.images.mode_changed("land")
+        self.assertEqual(app.draft_config().land_mode, "photo")
+        app.images.remove("water")
+        draft = app.draft_config()
+        self.assertEqual((draft.water_image, draft.water_mode, draft.land_mode), ("", "off", "photo"))
+
+    def test_small_objects_can_be_added_and_removed(self):
+        from deskisle.ui import images
+        from deskisle.ui.widgets import ObjectTile
+        app, _ = self._make_app()
+        sources = []
+        for i, color in enumerate(((255, 0, 0, 255), (0, 0, 255, 255))):
+            path = Path(self.tmp.name) / f"物件{i}.png"
+            Image.new("RGBA", (50, 50), color).save(path)
+            sources.append(str(path))
+        with mock.patch.object(images.filedialog, "askopenfilenames", return_value=sources):
+            app.images.add_objects()
+            app.images.add_objects()                                  # 重複加入同一張不會多一個
+        self.assertEqual(len(app.draft_config().objects), 2)
+        tiles = [w for w in app.images.gallery.winfo_children() if isinstance(w, ObjectTile)]
+        self.assertEqual([t.adding for t in tiles], [False, False, True])
+        tiles[0]._click()                                             # 點小物件 = 刪除
+        self.assertEqual(app.draft_config().objects, (app.images.objects[0],))
+        app.images.var_zone.set("both")
+        app.images.var_shape.set("circle")
+        draft = app.draft_config()
+        self.assertEqual((draft.objects_zone, draft.objects_shape), ("both", "circle"))
 
     def test_night_settings_apply_immediately_and_explain_themselves(self):
         from deskisle.ui import app as gui

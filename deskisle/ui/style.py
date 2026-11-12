@@ -68,6 +68,13 @@ DARK = Palette(
 )
 
 
+# 版面尺寸(以 100% 縮放為準)
+SIDEBAR_WIDTH = 212
+SETTINGS_WIDTH = 408
+PREVIEW_SIZE = (480, 300)
+TEXT_WRAP = SETTINGS_WIDTH - 40
+
+
 # ---------------------------------------------------------------------------
 # 字型
 # ---------------------------------------------------------------------------
@@ -194,6 +201,17 @@ def icon(name: str, size: int, color: str) -> Image.Image:
         draw.line(pts((12, 3.5), (12, 14.5)), fill=c, width=w)
         draw.line(pts((7.5, 10.5), (12, 15), (16.5, 10.5)), fill=c, width=w, joint="curve")
         draw.line(pts((4, 15.5), (4, 19.5), (20, 19.5), (20, 15.5)), fill=c, width=w, joint="curve")
+    elif name == "plus":
+        draw.line(pts((12, 5), (12, 19)), fill=c, width=w)
+        draw.line(pts((5, 12), (19, 12)), fill=c, width=w)
+    elif name == "close":
+        draw.line(pts((6.5, 6.5), (17.5, 17.5)), fill=c, width=w)
+        draw.line(pts((17.5, 6.5), (6.5, 17.5)), fill=c, width=w)
+    elif name == "palette":       # 調色盤
+        draw.ellipse(box(3, 3, 21, 21), outline=c, width=w)
+        for x, y in ((8.5, 9), (12.5, 7), (16, 9.5)):
+            draw.ellipse(box(x - 1.5, y - 1.5, x + 1.5, y + 1.5), fill=c)
+        draw.ellipse(box(13, 13.5, 17.5, 18), outline=c, width=w)
     elif name == "check":
         draw.line(pts((5, 12.5), (10, 17.5), (19.5, 7)), fill=c, width=int(w * 1.15), joint="curve")
     elif name == "brush":         # 套用:畫筆
@@ -207,6 +225,13 @@ def icon(name: str, size: int, color: str) -> Image.Image:
 # 主題縮圖用的假圖示:左上一群、右下一個,看得出陸地與水
 _SWATCH_RECTS = ((0.06, 0.08, 0.20, 0.32), (0.06, 0.38, 0.20, 0.62), (0.22, 0.08, 0.36, 0.32),
                  (0.66, 0.56, 0.80, 0.82))
+
+
+def contain(image: Image.Image, width: int, height: int) -> Image.Image:
+    """等比例縮小到放得進 width×height(不裁切)。"""
+    copy = image.copy()
+    copy.thumbnail((max(1, width), max(1, height)), _RES.LANCZOS)
+    return copy
 
 
 def theme_swatch(theme: Theme, size: Tuple[int, int], scale: float) -> Image.Image:

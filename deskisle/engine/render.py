@@ -48,18 +48,31 @@ def _add_sparkles(rgb: np.ndarray, s: np.ndarray, theme: Theme, seed: int, scale
         rgb[by, bx] = np.maximum(rgb[by, bx], colors[big] * 0.45)
 
 
+def object_rules(count: int, zone: str, amount: float, size: float) -> list:
+    """小物件的擺放規則:每個小物件一條(放「都可以」時陸地、海上各一條),機率平分。"""
+    zones = {"water": [(40.0, 1e9)], "land": [(-1e9, -16.0)], "both": [(-1e9, -16.0), (40.0, 1e9)]}[zone]
+    chance = 0.012 * amount / max(1, count) / len(zones)
+    size_range = (max(8, int(size * 0.75)), max(10, int(size * 1.25)))
+    return [decor.DecorRule(f"user{i}", lo, hi, chance, size_range, spin=0.06)
+            for i in range(count) for lo, hi in zones]
+
+
 def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
            margin: float = 46.0, blend: float = 26.0, roughness: float = 22.0,
            seed: int = 7, scale: float = 1.0, decorations: float = 1.0,
-           debug: bool = False, photo: Optional[np.ndarray] = None, photo_mode: str = "",
-           tags: Sequence[str] = ()) -> Image.Image:
+           debug: bool = False, land_photo: Optional[np.ndarray] = None,
+           water_photo: Optional[np.ndarray] = None, tags: Sequence[str] = (),
+           objects: Sequence[Image.Image] = (), objects_zone: str = "water", objects_amount: float = 1.0,
+           objects_size: float = 64.0) -> Image.Image:
     """畫出一張 width×height 的 RGB 圖片。
 
     rects 是圖示矩形(圖片座標);scale 是縮放比例,像素類參數都會乘上它
     (畫縮小的預覽圖時,把矩形與 scale 一起縮小即可)。
     decorations 是裝飾物密度(0 = 不畫)。debug=True 會畫出圖示外框。
-    photo 是使用者的圖片(已經裁成 height×width×3,見 photo.cover);
-    photo_mode = "land" 時鋪在陸地上,"water" 時鋪在海上。
+    land_photo / water_photo 是使用者的圖片(已經裁成 height×width×3,見 photo.cover),
+    分別鋪在陸地上、海上(可以同時用)。
+    objects 是使用者的小物件(RGBA),依 objects_zone(water / land / both)、
+    objects_amount(數量倍率)、objects_size(100% 縮放下的像素)散落在桌布上。
     tags 與 rects 一一對應,是每個圖示的檔案類型(見 filetypes.py);有的話會在圖示旁邊
     放代表該類型的裝飾物(主題的 companions)。
     """
@@ -115,18 +128,18 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
     # ---- 使用者的圖片 ------------------------------------------------------
     # 在浪花之前合成:海岸線上的沙灘、淺灘與浪花仍然是主題的,島的輪廓才看得清楚
     rules = theme.decor
-    if photo is not None and photo_mode in ("land", "water"):
-        if photo_mode == "land":
-            weight = smoothstep(-7.0, -16.0, s)          # 海岸留一圈主題的沙灘
-            rim = smoothstep(-48.0, -10.0, s)            # 靠近海岸稍微壓暗,島的邊緣才有立體感
-            rules = tuple(r for r in rules if r.lo >= -16)   # 不在圖片上放樹、花
-        else:
-            weight = smoothstep(12.0, 34.0, s)           # 海岸邊留一圈主題的淺灘
-            rim = 1.0 - smoothstep(12.0, 90.0, s)
-            rules = tuple(r for r in rules if r.hi <= 34)    # 不在圖片上放船、魚、星球
-        picture = photo * (1.0 - 0.24 * rim)[..., None]
-        rgb += (picture - rgb) * weight[..., None]
-        del weight, rim, picture
+    if land_photo is not None:
+        weight = smoothstep(-7.0, -16.0, s)              # 海岸留一圈主題的沙灘
+        rim = smoothstep(-48.0, -10.0, s)                # 靠近海岸稍微壓暗,島的邊緣才有立體感
+        rgb += (land_photo * (1.0 - 0.24 * rim)[..., None] - rgb) * weight[..., None]
+        rules = tuple(r for r in rules if r.lo >= -16)   # 不在圖片上放樹、花
+        del weight, rim
+    if water_photo is not None:
+        weight = smoothstep(12.0, 34.0, s)               # 海岸邊留一圈主題的淺灘
+        rim = 1.0 - smoothstep(12.0, 90.0, s)
+        rgb += (water_photo * (1.0 - 0.24 * rim)[..., None] - rgb) * weight[..., None]
+        rules = tuple(r for r in rules if r.hi <= 34)    # 不在圖片上放船、魚、星球
+        del weight, rim
 
     # ---- 浪花 --------------------------------------------------------------
     lam = theme.wave_length
@@ -157,14 +170,22 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
     image = Image.fromarray(rgb.astype(np.uint8), "RGB")
     del rgb
 
-    if decorations > 0:
-        companions = []
-        if tags and theme.companions:
-            companions = decor.place_companions(s, rects, tags, dict(theme.companions), seed=seed, scale=scale)
-        # 一般裝飾物要避開圖示,也要避開剛放好的檔案類型裝飾物
-        placements = decor.place(s, list(rects) + decor.footprint(companions), rules, seed=seed,
-                                 density=decorations, scale=scale) if rules else []
-        decor.draw(image, placements + companions, scale)
+    # 放的順序:檔案類型裝飾物 → 小物件 → 一般裝飾物;後放的會避開先放的
+    companions = []
+    if decorations > 0 and tags and theme.companions:
+        companions = decor.place_companions(s, rects, tags, dict(theme.companions), seed=seed, scale=scale)
+    custom = {}
+    extras = []
+    if objects and objects_amount > 0:
+        custom = {f"user{i}": sprite for i, sprite in enumerate(objects)}
+        extras = decor.place(s, list(rects) + decor.footprint(companions),
+                             object_rules(len(objects), objects_zone, objects_amount, objects_size),
+                             seed=seed + 5150, density=1.0, scale=scale)
+    placements = []
+    if decorations > 0 and rules:
+        taken = list(rects) + decor.footprint(companions) + decor.footprint(extras)
+        placements = decor.place(s, taken, rules, seed=seed, density=decorations, scale=scale)
+    decor.draw(image, placements + companions + extras, scale, custom)
 
     if debug:
         draw = ImageDraw.Draw(image)

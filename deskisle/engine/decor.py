@@ -623,11 +623,25 @@ def footprint(placements: Sequence[Placement]) -> List[Rect]:
     return [(p.x - p.size // 2, p.y - p.size // 2, p.x + p.size // 2, p.y + p.size // 2) for p in placements]
 
 
-def draw(image: Image.Image, placements: Sequence[Placement], scale: float = 1.0) -> None:
-    """把裝飾物畫到圖上(直接修改 image)。"""
+def draw(image: Image.Image, placements: Sequence[Placement], scale: float = 1.0,
+         custom: Dict[str, Image.Image] = None) -> None:
+    """把裝飾物畫到圖上(直接修改 image)。
+
+    custom 是使用者的小物件:種類名稱 → RGBA 圖片;等比例縮小到放進 size×size 的框裡。
+    """
+    custom = custom or {}
+    resized: Dict[tuple, Image.Image] = {}
     for p in sorted(placements, key=lambda q: (q.y, q.x)):
         rule = p.rule
-        art = sprite(rule.kind, p.size, p.variant, rule.colors)
+        if rule.kind in custom:
+            key = (rule.kind, p.size)
+            art = resized.get(key)
+            if art is None:
+                art = custom[rule.kind].copy()
+                art.thumbnail((p.size, p.size), _RES.LANCZOS)
+                resized[key] = art
+        else:
+            art = sprite(rule.kind, p.size, p.variant, rule.colors)
         if rule.spin and abs(p.angle) > 0.5:
             art = art.rotate(p.angle, resample=_RES.BICUBIC, expand=True)
         if rule.alpha < 1.0:
