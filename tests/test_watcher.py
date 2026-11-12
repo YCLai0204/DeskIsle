@@ -199,3 +199,48 @@ class WatchLoopTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NightThemeTests(unittest.TestCase):
+    """依時間換主題(純計算,任何作業系統都能跑)。"""
+
+    def test_night_can_cross_midnight(self):
+        from deskisle.watcher import is_night
+        config = Config(night_mode=True, night_start=19, day_start=7)
+        self.assertEqual([h for h in range(24) if is_night(config, h)], [0, 1, 2, 3, 4, 5, 6, 19, 20, 21, 22, 23])
+        early = Config(night_mode=True, night_start=1, day_start=5)
+        self.assertEqual([h for h in range(24) if is_night(early, h)], [1, 2, 3, 4])
+        self.assertFalse(any(is_night(Config(night_start=8, day_start=8), h) for h in range(24)))
+
+    def test_effective_config_swaps_only_the_theme_and_only_when_on(self):
+        from deskisle.watcher import effective_config
+        config = Config(theme="beach", night_theme="cosmos", night_mode=True)
+        self.assertEqual(effective_config(config, hour=22).theme, "cosmos")
+        self.assertEqual(effective_config(config, hour=12).theme, "beach")
+        self.assertEqual(effective_config(config, hour=22).seed, config.seed)
+        self.assertEqual(effective_config(Config(night_mode=False), hour=22).theme, "beach")
+
+    def test_bad_hours_or_theme_are_rejected(self):
+        for bad in (dict(night_start=24), dict(day_start=-1), dict(night_theme="nope")):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                Config(**bad).validate()
+
+
+@unittest.skipUnless(WINDOWS, "需要 Windows")
+class NightWatchTests(unittest.TestCase):
+    def test_wallpaper_is_redrawn_when_night_begins(self):
+        from deskisle import watcher
+        from deskisle.engine.layout import DesktopIcon, DesktopLayout
+        layout = DesktopLayout(640, 360, (DesktopIcon("a", 10, 10, 86, 80),))
+        hours = iter([18, 18, 19, 19])
+        themes = []
+        config = Config(night_mode=True, night_theme="night", night_start=19, debounce=0)
+        w = watcher.Watcher(lambda: config)
+        with mock.patch.object(watcher, "read_layout", lambda names=True: layout), \
+                mock.patch.object(watcher, "apply_layout", lambda lay, cfg: themes.append(cfg.theme)), \
+                mock.patch.object(watcher, "current_hour", lambda: next(hours)), \
+                mock.patch.object(watcher.system, "user_is_busy", lambda: False), \
+                mock.patch.object(watcher.system, "desktop_is_foreground", lambda: True), \
+                mock.patch.object(w._wake, "wait", lambda timeout=None: None):
+            w.run(max_updates=2)
+        self.assertEqual(themes, ["beach", "night"])

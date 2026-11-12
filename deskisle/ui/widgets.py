@@ -476,6 +476,76 @@ class Segmented(_CanvasWidget):
 
 
 # ---------------------------------------------------------------------------
+class Dropdown(_CanvasWidget):
+    """下拉選單:看起來像按鈕,點一下跳出選項清單。綁定一個 StringVar。"""
+
+    def __init__(self, parent, kit: Kit, options, variable: tk.StringVar, command: Optional[Callable] = None,
+                 bg: Optional[str] = None):
+        px = kit.px
+        self.options = list(options)              # [(值, 顯示文字), ...]
+        font = kit.fonts["caption"]
+        self._pad, self._arrow = px(12), px(14)
+        width = max(font.measure(text) for _value, text in self.options) + self._pad * 2 + self._arrow + px(6)
+        height = px(30)
+        super().__init__(parent, kit, bg, width=width, height=height, cursor="hand2", takefocus=1)
+        self.variable, self.command = variable, command
+        self.size = (width, height)
+        self._chosen = tk.StringVar(master=kit.root, value=variable.get())
+        p = kit.p
+        self.menu = tk.Menu(self, tearoff=0, background=p.card, foreground=p.text, activebackground=p.accent_soft,
+                            activeforeground=p.text, selectcolor=p.accent, font=font, borderwidth=0)
+        for value, text in self.options:
+            self.menu.add_radiobutton(label=text, value=value, variable=self._chosen, command=self._picked)
+        self._watch(variable, self._paint)
+        for sequence, handler in (("<Enter>", self._enter), ("<Leave>", self._leave),
+                                  ("<ButtonRelease-1>", self._open), ("<KeyPress-space>", self._open),
+                                  ("<KeyPress-Return>", self._open)):
+            self.bind(sequence, handler)
+        self._paint()
+
+    def text(self) -> str:
+        current = self.variable.get()
+        return next((text for value, text in self.options if value == current), current)
+
+    def _paint(self) -> None:
+        p, kit, px = self.kit.p, self.kit, self.kit.px
+        self.delete("all")
+        width, height = self.size
+        self.create_image(0, 0, anchor="nw", image=kit.round_rect(
+            width, height, px(7), p.card_hover if self.hover else p.card, p.border_strong))
+        self.create_text(self._pad, height / 2, anchor="w", text=self.text(), fill=p.text, font=kit.fonts["caption"])
+        self.create_image(width - self._pad + px(2), height / 2, anchor="e",
+                          image=kit.icon("chevron", self._arrow, p.muted))
+
+    def _open(self, _event=None) -> None:
+        self.focus_set()
+        self._chosen.set(self.variable.get())
+        try:
+            self.menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.size[1] + self.kit.px(2))
+        finally:
+            self.menu.grab_release()
+
+    def _picked(self) -> None:
+        if self._chosen.get() != self.variable.get():
+            self.variable.set(self._chosen.get())
+            if self.command:
+                self.command()
+
+    def choose(self, value: str) -> None:
+        """跟使用者從清單選一樣(測試用)。"""
+        self._chosen.set(value)
+        self._picked()
+
+    def _enter(self, _event) -> None:
+        self.hover = True
+        self._paint()
+
+    def _leave(self, _event) -> None:
+        self.hover = False
+        self._paint()
+
+
+# ---------------------------------------------------------------------------
 class Pill(_CanvasWidget):
     """小標籤(例如「尚未套用」)。沒有文字時不佔空間。"""
 

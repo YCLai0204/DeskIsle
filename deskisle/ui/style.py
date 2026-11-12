@@ -186,6 +186,11 @@ def icon(name: str, size: int, color: str) -> Image.Image:
     elif name == "power":         # 電源
         draw.arc(box(4.5, 5, 19.5, 20), 300, 600, fill=c, width=w)
         draw.line(pts((12, 3), (12, 11.5)), fill=c, width=w)
+    elif name == "chevron":       # 往下的箭頭(下拉選單)
+        draw.line(pts((6.5, 9.5), (12, 15), (17.5, 9.5)), fill=c, width=w, joint="curve")
+    elif name == "moon":          # 月亮
+        draw.ellipse(box(4, 4, 20, 20), fill=c)
+        draw.ellipse(box(9.5, 1.5, 23.5, 15.5), fill=(0, 0, 0, 0))
     elif name == "check":
         draw.line(pts((5, 12.5), (10, 17.5), (19.5, 7)), fill=c, width=int(w * 1.15), joint="curve")
     elif name == "brush":         # 套用:畫筆

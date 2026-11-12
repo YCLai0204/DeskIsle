@@ -194,6 +194,24 @@ class GuiTests(unittest.TestCase):
         app._remove_image()
         self.assertEqual((app.draft_config().image, app.draft_config().image_mode), ("", "off"))
 
+    def test_night_settings_apply_immediately_and_explain_themselves(self):
+        from deskisle.ui import app as gui
+        from deskisle.ui.widgets import Dropdown
+        app, _ = self._make_app()
+        theme_box = next(w for w in _descendants(app.root)
+                         if isinstance(w, Dropdown) and w.variable is app.var_night_theme)
+        app.var_night.set(True)
+        app._behavior_changed()
+        theme_box.choose("cosmos")
+        self.assertEqual(theme_box.text(), "宇宙")
+        self.assertTrue(app.applied.night_mode)
+        self.assertEqual(app.applied.night_theme, "cosmos")
+        self.assertEqual(app.applied.theme, "beach")              # 白天的主題不受影響
+        with mock.patch.object(gui, "current_hour", lambda: 23):
+            app._refresh_night_hint()
+        self.assertIn("現在是晚上,桌布使用「宇宙」", app.night_hint.cget("text"))
+        self.assertIn("自動跟隨", app.night_hint.cget("text"))
+
     def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
         app, root = self._make_app()
         app._on_reseed(4321)

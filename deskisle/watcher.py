@@ -28,6 +28,27 @@ from .engine.themes import Theme, get_theme
 GAP_COLOR = (0, 0, 0)   # 多螢幕合成圖中,沒有螢幕的空隙
 
 
+def is_night(config: Config, hour: int) -> bool:
+    """hour 點是不是設定裡的「晚上」時段(可以跨過午夜,例如 19 點到隔天 7 點)。"""
+    start, end = config.night_start, config.day_start
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def current_hour() -> int:
+    return time.localtime().tm_hour
+
+
+def effective_config(config: Config, hour: Optional[int] = None) -> Config:
+    """依時間換主題:開啟而且現在是晚上時,主題換成晚上的主題。"""
+    if config.night_mode and is_night(config, current_hour() if hour is None else hour):
+        return replace(config, theme=config.night_theme)
+    return config
+
+
 def resolve_theme(config: Config) -> Theme:
     """實際要用的主題:選「從圖片取色」時,是用圖片顏色重新上色過的版本。"""
     theme = get_theme(config.theme)
@@ -229,7 +250,7 @@ class Watcher:
         updates = 0
         try:
             while not self._stop.is_set() and (max_updates is None or updates < max_updates):
-                config = self._get_config()
+                config = effective_config(self._get_config())   # 晚上換主題:時段一變,外觀就不同而重畫
                 debouncer.debounce = config.debounce
                 delay, applied = self._tick(config, debouncer)
                 updates += applied

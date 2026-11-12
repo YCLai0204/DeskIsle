@@ -37,11 +37,11 @@ from ..engine.layout import DesktopLayout, Screen
 from ..engine.themes import DECOR_LABELS, THEMES, get_theme
 from ..filetypes import KIND_LABELS
 from ..system import autostart, read_layout, wallpaper
-from ..watcher import Watcher, WatchStatus, apply_layout, look_key
+from ..watcher import Watcher, WatchStatus, apply_layout, current_hour, effective_config, is_night, look_key
 from . import style, tray
 from .preview import fit_width, render_preview, render_preview_image
-from .widgets import (Button, Card, Divider, Kit, NavItem, Pill, ScreenTile, ScrollArea, Segmented, Slider,
-                      ThemeTile, Toggle, label, to_photo)
+from .widgets import (Button, Card, Divider, Dropdown, Kit, NavItem, Pill, ScreenTile, ScrollArea, Segmented,
+                      Slider, ThemeTile, Toggle, label, to_photo)
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
@@ -175,6 +175,9 @@ class App:
         self.var_appearance = tk.StringVar(value=self.applied.appearance)
         self.var_image, self.var_image_mode = tk.StringVar(), tk.StringVar(value="off")
         self.var_file_decor = tk.BooleanVar(value=True)
+        self.var_night = tk.BooleanVar()
+        self.var_night_theme = tk.StringVar(value="night")
+        self.var_night_start, self.var_day_start = tk.StringVar(value="19"), tk.StringVar(value="7")
 
         self._build_sidebar()
 
@@ -667,6 +670,8 @@ class App:
             title, hint = "開機時自動啟動", "啟動後縮在系統匣"
         self.toggle_row(body, title, hint, self.var_autostart, self._autostart_toggled)
 
+        self._build_night_section(page)
+
         self.section(page, "省電")
         body = self.card(page)
         self.toggle_row(body, "全螢幕或鎖定時暫停", "玩遊戲、看影片或螢幕鎖定時不檢查", self.var_pause,
@@ -685,6 +690,37 @@ class App:
         self.segmented_row(body, "配色", "設定視窗的顏色;跟隨系統時會依照系統的淺色/深色模式",
                            APPEARANCE_OPTIONS, self.var_appearance, self._appearance_changed)
         label(page, kit, "", font="small").pack(pady=(0, kit.px(4)))
+
+    def _build_night_section(self, page: tk.Frame) -> None:
+        """依時間換主題:開關、晚上的主題、時段,以及現在是白天還是晚上。"""
+        kit = self.kit
+        p, px = kit.p, kit.px
+        self.section(page, "依時間換主題")
+        body = self.card(page)
+        self.toggle_row(body, "晚上自動換主題", "到了晚上換成另一個主題,早上再換回來", self.var_night,
+                        self._behavior_changed)
+        _line, slot = self.row(body, "晚上的主題")
+        Dropdown(slot, kit, [(t.key, t.label) for t in THEMES.values()], self.var_night_theme,
+                 self._behavior_changed).pack()
+        line, slot = self.row(body, "晚上的時段", "例如 19:00 到隔天 07:00")
+        hours = [(str(h), f"{h:02d}:00") for h in range(24)]
+        Dropdown(slot, kit, hours, self.var_night_start, self._behavior_changed).pack(side="left")
+        label(slot, kit, "到", font="caption", color=p.muted).pack(side="left", padx=px(6))
+        Dropdown(slot, kit, hours, self.var_day_start, self._behavior_changed).pack(side="left")
+        self.night_hint = label(line, kit, font="caption", color=p.muted, wrap=TEXT_WRAP - 30)
+        self.night_hint.grid(row=2, column=0, columnspan=2, sticky="w", pady=(px(10), 0))
+
+    def _refresh_night_hint(self) -> None:
+        draft = self.draft_config()
+        if not draft.night_mode:
+            text = "關閉中:桌布一直使用「外觀」頁選的主題。"
+        else:
+            night = is_night(draft, current_hour())
+            theme = get_theme(draft.night_theme if night else draft.theme).label
+            text = f"現在是{'晚上' if night else '白天'},桌布使用「{theme}」。"
+            if not draft.follow:
+                text += "要開啟「自動跟隨」,時間到了才會自動換。"
+        self.night_hint.configure(text=text)
 
     # ---------------------------------------------------------------- 設定值
     def _load_controls(self, config: Config) -> None:
@@ -709,6 +745,10 @@ class App:
         self.var_image.set(config.image)
         self.var_image_mode.set(config.image_mode)
         self.var_file_decor.set(config.file_decor)
+        self.var_night.set(config.night_mode)
+        self.var_night_theme.set(config.night_theme)
+        self.var_night_start.set(str(config.night_start))
+        self.var_day_start.set(str(config.day_start))
         self._set_header_state("following" if config.follow else "stopped",
                                "" if config.follow else "未開啟")
         try:
@@ -719,6 +759,7 @@ class App:
 
     def _refresh_labels(self) -> None:
         self.theme_hint.configure(text=get_theme(self._theme_key()).description)
+        self._refresh_night_hint()
         self._refresh_theme_tiles()
         self._refresh_image_card()
         pairs = [f"{KIND_LABELS[kind]} → {DECOR_LABELS.get(rule.kind, rule.kind)}"
@@ -754,6 +795,10 @@ class App:
             image=self.var_image.get(),
             image_mode=self.var_image_mode.get(),
             file_decor=bool(self.var_file_decor.get()),
+            night_mode=bool(self.var_night.get()),
+            night_theme=self.var_night_theme.get(),
+            night_start=int(self.var_night_start.get()),
+            day_start=int(self.var_day_start.get()),
         ).validate()
 
     def _save(self) -> None:
@@ -792,8 +837,11 @@ class App:
             self.applied, follow=draft.follow, poll_interval=draft.poll_interval,
             idle_interval=draft.idle_interval, debounce=draft.debounce,
             pause_when_busy=draft.pause_when_busy, reseed_on_move=draft.reseed_on_move,
+            night_mode=draft.night_mode, night_theme=draft.night_theme,
+            night_start=draft.night_start, day_start=draft.day_start,
         )
         self._save()
+        self._refresh_night_hint()
 
     def _appearance_changed(self) -> None:
         """換配色:立刻存檔並重建視窗(只換顏色,外觀設定維持已套用的那一份)。"""
@@ -820,6 +868,7 @@ class App:
             self.set_status("已停止跟隨。桌布會維持現在的樣子。")
         if self.tray:
             self.tray.refresh()
+        self._refresh_night_hint()
 
     def _toggle_follow_from_tray(self) -> None:
         self.var_follow.set(not self.var_follow.get())
@@ -851,7 +900,7 @@ class App:
         self._busy_applying = True
         self.apply_button.set_enabled(False)
         self.set_status("正在繪製桌布…")
-        config = self.applied
+        config = effective_config(self.applied)     # 晚上時段會換成晚上的主題
 
         def work():
             system.lower_thread_priority()
@@ -965,6 +1014,8 @@ class App:
                 info += " · 桌面圖示目前是隱藏的"
             if config.image_mode != "off" and photo.load(config.image) is None:
                 info += " · 找不到自訂圖片,先用一般主題"
+            if effective_config(config).theme != config.theme:
+                info += f" · 現在是晚上,桌布會用「{get_theme(config.night_theme).label}」"
             self._ui(self._preview_done, buffer.getvalue(), "", None if override else layout.screens, info)
         except Exception as exc:
             self._ui(self._preview_done, None, str(exc))

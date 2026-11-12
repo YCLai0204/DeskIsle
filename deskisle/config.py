@@ -35,6 +35,10 @@ class Config:
     image: str = ""                # 使用者的圖片(匯入到 app_dir()/images 的那一份)
     image_mode: str = "off"        # 圖片的用法:off / land(當陸地)/ water(當海)/ colors(取色)
     file_decor: bool = True        # 依檔案類型在圖示旁邊放裝飾物(資料夾 → 椰子樹……)
+    night_mode: bool = False       # 晚上自動換成另一個主題
+    night_theme: str = "night"     # 晚上用的主題
+    night_start: int = 19          # 幾點開始算晚上(0~23)
+    day_start: int = 7             # 幾點開始算白天(0~23);跟 night_start 一樣 = 永遠是白天
 
     def validate(self) -> "Config":
         get_theme(self.theme)
@@ -46,6 +50,9 @@ class Config:
             raise ValueError("poll_interval 與 idle_interval 不可小於 0.1 秒")
         if not isinstance(self.screens, tuple) or not all(isinstance(i, str) for i in self.screens):
             raise ValueError("screens 必須是螢幕代碼(文字)的清單")
+        get_theme(self.night_theme)
+        if not (0 <= self.night_start <= 23 and 0 <= self.day_start <= 23):
+            raise ValueError("night_start 與 day_start 必須是 0~23 點")
         if self.image_mode not in IMAGE_MODES:
             raise ValueError(f"image_mode 必須是 {'、'.join(IMAGE_MODES)} 其中之一")
         if self.appearance not in APPEARANCES:
