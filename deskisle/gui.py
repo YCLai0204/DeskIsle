@@ -25,11 +25,10 @@ from typing import Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import APP_NAME, __version__, autostart, is_frozen, tray, wallpaper, winapi
-from . import screens as screen_api
+from . import APP_NAME, __version__, is_frozen, system, tray
 from . import ui_style
 from .config import Config, app_dir, load_config, save_config
-from .icons import read_layout
+from .system import autostart, read_layout, wallpaper
 from .layout import DesktopLayout, Screen
 from .themes import THEMES, get_theme
 from .watcher import Watcher, WatchStatus, apply_layout, look_key, render_screen
@@ -69,7 +68,7 @@ def render_preview(layout: DesktopLayout, config: Config, width: int, debug: boo
         chosen = set(layout.selected_screens(config.screens))
         image = Image.new("RGB", (width, height), PREVIEW_GAP)
         draw = ImageDraw.Draw(image)
-        badge = max(14, int(18 * winapi.ui_scale()))
+        badge = max(14, int(18 * system.ui_scale()))
         font = _badge_font(int(badge * 0.62))
         for number, screen in enumerate(screens, 1):
             box = (int(round(screen.left * ratio)), int(round(screen.top * ratio)),
@@ -179,7 +178,7 @@ class App:
 
     def _build_ui(self) -> None:
         root = self.root
-        self._scale = winapi.ui_scale()
+        self._scale = system.ui_scale()
         self.fonts = ui_style.setup(root, self._scale)
         px = self._px
         self.preview_width = int(min(900, PREVIEW_WIDTH * self._scale))
@@ -404,9 +403,8 @@ class App:
     @staticmethod
     def _current_screens() -> Tuple[Screen, ...]:
         try:
-            vx, vy, _w, _h = winapi.virtual_screen()
-            return screen_api.list_screens(vx, vy)
-        except OSError:
+            return system.list_screens()
+        except (OSError, system.IconDetectionError):
             return ()
 
     def _set_screens(self, screens: Tuple[Screen, ...]) -> None:
@@ -645,7 +643,7 @@ class App:
         config = self.applied
 
         def work():
-            winapi.lower_thread_priority()
+            system.lower_thread_priority()
             try:
                 started = time.perf_counter()
                 layout = read_layout(names=False)
@@ -656,7 +654,7 @@ class App:
                 log_error(traceback.format_exc())
                 message = f"套用失敗:{exc}"
             finally:
-                winapi.trim_memory()
+                system.trim_memory()
             self._ui(self._apply_finished, message)
 
         threading.Thread(target=work, name="deskisle-apply", daemon=True).start()
@@ -808,13 +806,13 @@ class App:
 
     def _listen_for_second_instance(self) -> None:
         """再次啟動程式時,由已經在執行的這一個把視窗叫出來。"""
-        handle = winapi.create_signal(SHOW_SIGNAL)
+        handle = system.create_signal(SHOW_SIGNAL)
         if not handle:
             return
 
         def wait():
             while not self._quitting:
-                if not winapi.wait_signal(handle):
+                if not system.wait_signal(handle):
                     break   # 等待失敗就放棄,不能空轉
                 self._ui(self.show)
 
@@ -866,12 +864,12 @@ def main(argv=None) -> int:
     parser.add_argument("--selftest", metavar="FILE")
     args, _unknown = parser.parse_known_args(argv)
 
-    winapi.enable_dpi_awareness()
+    system.enable_dpi_awareness()
     if args.selftest:
         return selftest(args.selftest)
 
-    if not winapi.acquire_single_instance(INSTANCE_NAME):
-        winapi.send_signal(SHOW_SIGNAL)   # 已經在執行 → 請它把視窗叫出來
+    if not system.acquire_single_instance(INSTANCE_NAME):
+        system.send_signal(SHOW_SIGNAL)   # 已經在執行 → 請它把視窗叫出來
         return 0
 
     root = tk.Tk()

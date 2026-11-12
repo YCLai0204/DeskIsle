@@ -7,6 +7,10 @@ from typing import Iterable, List, Tuple
 Rect = Tuple[int, int, int, int]
 
 
+class IconDetectionError(RuntimeError):
+    """讀不到桌面圖示(找不到桌面視窗、沒有權限等);監看時會在下一輪重試。"""
+
+
 @dataclass(frozen=True)
 class Screen:
     """一個螢幕;座標是圖片座標(以虛擬桌面左上角為原點的實體像素)。"""
@@ -16,6 +20,7 @@ class Screen:
     width: int
     height: int
     primary: bool = False
+    scale: float = 1.0   # 每個座標單位是幾個實體像素(Windows 是 1;Mac 的 Retina 螢幕是 2)
 
     @property
     def right(self) -> int:

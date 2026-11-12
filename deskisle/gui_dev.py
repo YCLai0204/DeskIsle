@@ -19,9 +19,10 @@ from pathlib import Path
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-from . import __version__, decor, winapi
+from . import __version__, decor, system
 from .config import app_dir
-from .icons import DesktopIcon, DesktopLayout, read_layout
+from .layout import DesktopIcon, DesktopLayout
+from .system import read_layout
 from .themes import THEMES
 from .watcher import render_layout
 
@@ -75,8 +76,8 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
     count_var = tk.IntVar(value=25)
 
     def fake_layout() -> None:
-        _x, _y, width, height = winapi.virtual_screen()
-        scale = winapi.ui_scale()
+        _x, _y, width, height = system.virtual_screen()
+        scale = system.ui_scale()
         cell_w, cell_h = int(76 * scale), int(100 * scale)
         cols, rows = max(1, width // cell_w), max(1, (height - int(60 * scale)) // cell_h)
         cells = [(c, r) for c in range(cols) for r in range(rows)]
@@ -136,7 +137,7 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
                     best = took if best is None else min(best, took)
                 log(f"全尺寸繪製 {key:<8} {best:.2f} 秒")
             decor.clear_cache()
-            winapi.trim_memory()
+            system.trim_memory()
             log("完成")
         in_background(work)
 
@@ -168,10 +169,10 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
 
     def info() -> None:
         log(f"DeskIsle {__version__},Python {sys.version.split()[0]}")
-        log(f"縮放比例 {winapi.ui_scale():.2f},螢幕 {winapi.monitor_count()} 個")
+        log(f"縮放比例 {system.ui_scale():.2f},螢幕 {system.monitor_count()} 個")
         log(f"資料夾 {app_dir()}")
         log(f"監看狀態 {app.watcher.status}")
-        log(f"正對桌面 {winapi.desktop_is_foreground()},忙碌(全螢幕/鎖定){winapi.user_is_busy()}")
+        log(f"正對桌面 {system.desktop_is_foreground()},忙碌(全螢幕/鎖定){system.user_is_busy()}")
 
     for column in range(3):
         tools.columnconfigure(column, weight=1, uniform="tools")

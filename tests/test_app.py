@@ -144,7 +144,7 @@ class WatchLoopTests(unittest.TestCase):
         patches = [
             mock.patch.object(watcher, "read_layout", lambda names=True: layouts[0]),
             mock.patch.object(watcher.wallpaper, "apply_image", fake_apply),
-            mock.patch.object(watcher.winapi, "user_is_busy", lambda: busy),
+            mock.patch.object(watcher.system, "user_is_busy", lambda: busy),
         ]
         for p in patches:
             p.start()

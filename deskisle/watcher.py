@@ -17,10 +17,10 @@ from typing import Callable, Optional
 
 from PIL import Image
 
-from . import decor, wallpaper, winapi
+from . import decor, system
 from .config import Config
-from .icons import IconDetectionError, read_layout
-from .layout import DesktopLayout, screen_rects
+from .layout import DesktopLayout, IconDetectionError, screen_rects
+from .system import read_layout, wallpaper
 from .render import render
 from .themes import get_theme
 
@@ -29,7 +29,8 @@ GAP_COLOR = (0, 0, 0)   # 多螢幕合成圖中,沒有螢幕的空隙
 
 def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: float = 1.0,
                   debug: bool = False) -> Image.Image:
-    """畫出第 index 個螢幕的桌布。ratio < 1 時畫縮小版(預覽用)。
+    """畫出第 index 個螢幕的桌布。ratio < 1 時畫縮小版(預覽用);
+    ratio = screen.scale 時畫成螢幕的實體像素(Mac 的 Retina 螢幕)。
 
     每個螢幕各自計算地形;種子加上螢幕序號,讓同尺寸的螢幕也不會長得一樣。
     """
@@ -39,7 +40,7 @@ def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: floa
     return render(
         width, height, screen_rects(layout, screen, ratio), get_theme(config.theme),
         margin=config.margin, blend=config.blend, roughness=config.roughness,
-        seed=config.seed + 1013 * index, scale=winapi.ui_scale() * ratio,
+        seed=config.seed + 1013 * index, scale=system.ui_scale() * ratio,
         decorations=config.decorations, debug=debug,
     )
 
@@ -60,11 +61,14 @@ def apply_layout(layout: DesktopLayout, config: Config):
 
     多螢幕而且系統支援時,只畫、只更新設定裡選的螢幕;否則整個桌面畫成一張圖套用。
     """
+    screens = layout.screen_list()
     if layout.can_choose_screens():
-        screens = layout.screen_list()
-        images = [(screen, render_screen(layout, config, screens.index(screen)))
+        images = [(screen, render_screen(layout, config, screens.index(screen), ratio=screen.scale))
                   for screen in layout.selected_screens(config.screens)]
         return wallpaper.apply_per_screen(images)
+    if len(screens) == 1:
+        image = render_screen(layout, config, 0, ratio=screens[0].scale)
+        return [wallpaper.apply_image(image, 1)]
     return [wallpaper.apply_image(render_layout(layout, config), layout.monitors)]
 
 
@@ -187,7 +191,7 @@ class Watcher:
 
     def run(self, max_updates: Optional[int] = None) -> int:
         """監看直到 stop() 被呼叫。回傳重畫次數。max_updates 供測試用。"""
-        winapi.lower_thread_priority()
+        system.lower_thread_priority()
         debouncer = LayoutDebouncer(self._get_config().debounce)
         self._report(state="following", message="", updates=0)
         updates = 0
@@ -210,7 +214,7 @@ class Watcher:
     def _tick(self, config: Config, debouncer: LayoutDebouncer):
         """做一輪檢查;回傳 (下次檢查前要睡幾秒, 這一輪是否重畫了)。"""
         slow = max(config.idle_interval, config.poll_interval)
-        if config.pause_when_busy and winapi.user_is_busy():
+        if config.pause_when_busy and system.user_is_busy():
             self._report(state="paused", message="全螢幕程式執行中或螢幕已鎖定")
             return slow, 0
 
@@ -238,7 +242,7 @@ class Watcher:
                 return slow, 0
             finally:
                 decor.clear_cache()
-                winapi.trim_memory()
+                system.trim_memory()
             debouncer.mark_applied(signature)
             self._last_layout = layout_key
             if moved and self._on_reseed is not None:
@@ -255,7 +259,7 @@ class Watcher:
         if debouncer.waiting:
             # 排列待確認期間檢查得勤一點,讓反應時間接近 debounce
             return min(config.poll_interval, max(0.1, config.debounce / 2)), 0
-        return (config.poll_interval if winapi.desktop_is_foreground() else slow), 0
+        return (config.poll_interval if system.desktop_is_foreground() else slow), 0
 
 
 def watch(config: Config, log: Callable[[str], None] = print,

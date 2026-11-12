@@ -66,7 +66,7 @@ def _cmd_gui(args) -> int:
 
 
 def _cmd_icons(args) -> int:
-    from .icons import read_layout
+    from .system import read_layout
     layout = read_layout()
     print(f"畫面 {layout.width}x{layout.height},螢幕 {layout.monitors} 個,圖示 {len(layout.icons)} 個")
     for number, screen in enumerate(layout.screen_list(), 1):
@@ -80,7 +80,7 @@ def _cmd_icons(args) -> int:
 
 
 def _cmd_preview(args) -> int:
-    from .icons import read_layout
+    from .system import read_layout
     from .watcher import render_layout
     config = _load(args)
     layout = read_layout()
@@ -94,13 +94,13 @@ def _cmd_preview(args) -> int:
 
 
 def _print_backup_note() -> None:
-    from . import wallpaper
+    from .system import wallpaper
     print("原本的桌布已備份,隨時可用 `python -m deskisle restore` 還原。" if wallpaper.load_backup()
           else "注意:沒有原本桌布的備份可供還原。")
 
 
 def _cmd_apply(args) -> int:
-    from .icons import read_layout
+    from .system import read_layout
     from .watcher import apply_layout
     config = _load(args)
     layout = read_layout()
@@ -124,7 +124,7 @@ def _cmd_watch(args) -> int:
 
 
 def _cmd_restore(args) -> int:
-    from . import wallpaper
+    from .system import wallpaper
     state = wallpaper.restore()
     if state is None:
         print("沒有備份可還原(還沒套用過,或已經還原過了)。")
@@ -179,7 +179,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as exc:  # 使用者看到的是一行訊息,不是堆疊追蹤
-        from .icons import IconDetectionError
+        from .layout import IconDetectionError
         if isinstance(exc, (IconDetectionError, ValueError, OSError)):
             print(f"錯誤:{exc}", file=sys.stderr)
             return 1

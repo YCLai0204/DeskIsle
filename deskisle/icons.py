@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from . import screens as screen_api
 from . import winapi
-from .layout import DesktopIcon, DesktopLayout, Screen  # noqa: F401(其他模組從這裡匯入)
+from .layout import DesktopIcon, DesktopLayout, IconDetectionError, Screen  # noqa: F401
 from .winapi import kernel32, user32
 
 LVM_FIRST = 0x1000
@@ -25,10 +25,6 @@ LVIR_BOUNDS = 0
 _TEXT_OFFSET = 512      # 遠端緩衝區內,文字區的起始位移
 _TEXT_CHARS = 520       # 文字區可容納的字元數
 _BUFFER_SIZE = 4096
-
-
-class IconDetectionError(RuntimeError):
-    """找不到桌面 ListView,或無法讀取它。"""
 
 
 class _LVITEMW(ctypes.Structure):
