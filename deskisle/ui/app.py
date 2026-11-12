@@ -6,7 +6,8 @@
 - 中間是目前這一頁的設定(可以捲動)。
 - 右邊是即時預覽、「套用到桌布」與狀態訊息。
 
-配色跟著系統的淺色/深色模式;環境變數 DESKISLE_APPEARANCE=light 或 dark 可以強制指定。
+配色在「運作」頁選:跟隨系統、淺色或深色(切換時整個視窗立刻重建);
+環境變數 DESKISLE_APPEARANCE=light 或 dark 可以強制指定(開發時截圖用)。
 關閉視窗時縮到系統匣,監看繼續在背景執行。
 
 省資源:介面本身不做任何輪詢。預覽只在視窗看得見、而且設定有變時才重畫
@@ -37,8 +38,8 @@ from ..system import autostart, read_layout, wallpaper
 from ..watcher import Watcher, WatchStatus, apply_layout, look_key
 from . import style, tray
 from .preview import fit_width, render_preview, render_preview_image
-from .widgets import (Button, Card, Divider, Kit, NavItem, Pill, ScreenTile, ScrollArea, Slider, ThemeTile,
-                      Toggle, label, to_photo)
+from .widgets import (Button, Card, Divider, Kit, NavItem, Pill, ScreenTile, ScrollArea, Segmented, Slider,
+                      ThemeTile, Toggle, label, to_photo)
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
@@ -52,10 +53,15 @@ PREVIEW_SIZE = (480, 300)
 TEXT_WRAP = SETTINGS_WIDTH - 40
 
 
-def choose_palette() -> style.Palette:
+APPEARANCE_OPTIONS = (("system", "跟隨系統"), ("light", "淺色"), ("dark", "深色"))
+
+
+def choose_palette(appearance: str = "system") -> style.Palette:
     forced = os.environ.get("DESKISLE_APPEARANCE", "").strip().lower()
     if forced in ("light", "dark"):
-        return style.DARK if forced == "dark" else style.LIGHT
+        appearance = forced
+    if appearance in ("light", "dark"):
+        return style.DARK if appearance == "dark" else style.LIGHT
     try:
         return style.DARK if system.prefers_dark() else style.LIGHT
     except Exception:
@@ -138,10 +144,11 @@ class App:
             self.set_status(self.startup_warning)
 
     # ================================================================== 版面
-    def _build_ui(self) -> None:
+    def _build_ui(self, first: bool = True) -> None:
+        """建立整個視窗。first=False 是切換配色後的重建:沿用目前的視窗大小。"""
         root = self.root
         self._scale = system.ui_scale()
-        self.kit = kit = Kit(root, choose_palette(), self._scale)
+        self.kit = kit = Kit(root, choose_palette(self.applied.appearance), self._scale)
         p, px = kit.p, kit.px
         root.configure(background=p.bg)
         root.option_add("*Font", kit.fonts["body"])
@@ -156,6 +163,7 @@ class App:
         self.var_follow, self.var_pause = tk.BooleanVar(), tk.BooleanVar()
         self.var_autostart, self.var_reseed = tk.BooleanVar(), tk.BooleanVar()
         self.var_poll, self.var_idle, self.var_debounce = tk.DoubleVar(), tk.DoubleVar(), tk.DoubleVar()
+        self.var_appearance = tk.StringVar(value=self.applied.appearance)
 
         self._build_sidebar()
 
@@ -193,6 +201,12 @@ class App:
                 pass
         self.show_page("外觀")
 
+        try:
+            system.style_title_bar(root.winfo_id(), p.dark, p.bg, p.text)
+        except Exception:
+            pass
+        if not first:
+            return
         root.update_idletasks()
         want_w = px(SIDEBAR_WIDTH + 32 + SETTINGS_WIDTH + 12 + 22 + PREVIEW_SIZE[0] + 44 + 24)
         want_h = px(740)
@@ -200,10 +214,26 @@ class App:
         height = min(want_h, int(root.winfo_screenheight() * 0.86))
         root.geometry(f"{width}x{height}")
         root.minsize(min(width, px(SIDEBAR_WIDTH + SETTINGS_WIDTH + 400)), min(height, px(560)))
-        try:
-            system.style_title_bar(root.winfo_id(), p.dark, p.bg, p.text)
-        except Exception:
-            pass
+
+    def _rebuild_ui(self) -> None:
+        """換配色:記下畫面上的設定與目前的頁面,整個視窗重建後再放回去。"""
+        draft = self.draft_config()
+        page = self.current_page
+        for child in self.root.winfo_children():
+            child.destroy()
+        self._photo = None
+        self._preview_box = (0, 0)
+        self._preview_dirty = self._preview_busy   # 正在畫的那一張大小可能不對,畫完再畫一次
+        self.layout_override = None                 # 測試頁的狀態不保留
+        self.debug_preview = False
+        self._build_ui(first=False)
+        self._load_controls(draft)
+        if page in self.pages:
+            self.show_page(page)
+        self._update_pending()
+        if self.watcher.running:
+            self._show_watch_status(self.watcher.status)
+        self.schedule_preview(30)
 
     def _build_sidebar(self) -> None:
         kit = self.kit
@@ -326,8 +356,11 @@ class App:
         card.pack(fill="x")
         return card.body
 
-    def row(self, body: tk.Frame, title: str, hint: str = "") -> Tuple[tk.Frame, tk.Frame]:
-        """卡片裡的一列:左邊標題與說明,右邊放控制項(回傳 (這一列, 右邊的空位))。"""
+    def row(self, body: tk.Frame, title: str, hint: str = "", wide: bool = False) -> Tuple[tk.Frame, tk.Frame]:
+        """卡片裡的一列:左邊標題與說明,右邊放控制項(回傳 (這一列, 右邊的空位))。
+
+        wide=True:控制項放在說明下面,說明可以用整列的寬度。
+        """
         kit = self.kit
         p, px = kit.p, kit.px
         if body.winfo_children():
@@ -337,7 +370,7 @@ class App:
         line.columnconfigure(0, weight=1)
         label(line, kit, title).grid(row=0, column=0, sticky="w")
         if hint:
-            label(line, kit, hint, font="caption", color=p.muted, wrap=TEXT_WRAP - 110).grid(
+            label(line, kit, hint, font="caption", color=p.muted, wrap=TEXT_WRAP - (30 if wide else 110)).grid(
                 row=1, column=0, sticky="w", pady=(px(2), 0))
         slot = tk.Frame(line, background=p.card)
         slot.grid(row=0, column=1, rowspan=2, sticky="e", padx=(px(12), 0))
@@ -348,6 +381,13 @@ class App:
         toggle = Toggle(slot, self.kit, variable, command)
         toggle.pack()
         return toggle
+
+    def segmented_row(self, body, title: str, hint: str, options, variable: tk.StringVar, command) -> Segmented:
+        """標題與說明在上、一排選項在下的一列。"""
+        line, _slot = self.row(body, title, hint, wide=True)
+        control = Segmented(line, self.kit, options, variable, command)
+        control.grid(row=2, column=0, columnspan=2, sticky="w", pady=(self.kit.px(10), 0))
+        return control
 
     def slider_row(self, body, title: str, hint: str, variable: tk.DoubleVar, low: float, high: float,
                    fmt: str, command) -> None:
@@ -532,7 +572,13 @@ class App:
         self.slider_row(body, "穩定等待", "圖示停止移動多久後才重畫", self.var_debounce, 0.2, 3, "{:.1f} 秒",
                         self._behavior_changed)
         label(page, kit, "間隔越長越省電。桌布是靜態圖片,平常不使用顯示卡;只有圖示排列改變時才會花約半秒重畫一次。",
-              font="caption", color=kit.p.muted, wrap=TEXT_WRAP).pack(fill="x", pady=(kit.px(14), kit.px(6)))
+              font="caption", color=kit.p.muted, wrap=TEXT_WRAP).pack(fill="x", pady=(kit.px(14), 0))
+
+        self.section(page, "介面")
+        body = self.card(page)
+        self.segmented_row(body, "配色", "設定視窗的顏色;跟隨系統時會依照系統的淺色/深色模式",
+                           APPEARANCE_OPTIONS, self.var_appearance, self._appearance_changed)
+        label(page, kit, "", font="small").pack(pady=(0, kit.px(4)))
 
     # ---------------------------------------------------------------- 設定值
     def _load_controls(self, config: Config) -> None:
@@ -553,6 +599,7 @@ class App:
         self.var_poll.set(config.poll_interval)
         self.var_idle.set(config.idle_interval)
         self.var_debounce.set(config.debounce)
+        self.var_appearance.set(config.appearance)
         self._set_header_state("following" if config.follow else "stopped",
                                "" if config.follow else "未開啟")
         try:
@@ -590,6 +637,7 @@ class App:
             pause_when_busy=bool(self.var_pause.get()),
             reseed_on_move=bool(self.var_reseed.get()),
             screens=self._screen_choice,
+            appearance=self.var_appearance.get(),
         ).validate()
 
     def _save(self) -> None:
@@ -630,6 +678,15 @@ class App:
             pause_when_busy=draft.pause_when_busy, reseed_on_move=draft.reseed_on_move,
         )
         self._save()
+
+    def _appearance_changed(self) -> None:
+        """換配色:立刻存檔並重建視窗(只換顏色,外觀設定維持已套用的那一份)。"""
+        appearance = self.var_appearance.get()
+        if appearance == self.applied.appearance:
+            return
+        self.applied = replace(self.applied, appearance=appearance)
+        self._save()
+        self.root.after_idle(self._rebuild_ui)   # 不要在元件自己的事件處理中把它刪掉
 
     def _follow_toggled(self) -> None:
         if self.var_follow.get():

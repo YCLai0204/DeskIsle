@@ -397,6 +397,85 @@ class Slider(_CanvasWidget):
 
 
 # ---------------------------------------------------------------------------
+class Segmented(_CanvasWidget):
+    """幾個選項排成一排、一次選一個(例如「跟隨系統 / 淺色 / 深色」)。綁定一個 StringVar。"""
+
+    def __init__(self, parent, kit: Kit, options, variable: tk.StringVar, command: Optional[Callable] = None,
+                 bg: Optional[str] = None):
+        px = kit.px
+        self.options = list(options)          # [(值, 顯示文字), ...]
+        font = kit.fonts["caption"]
+        self._inset, height, pad = px(3), px(32), px(14)
+        self._widths = [font.measure(text) + pad * 2 for _value, text in self.options]
+        width = sum(self._widths) + self._inset * 2
+        super().__init__(parent, kit, bg, width=width, height=height, cursor="hand2", takefocus=1)
+        self.variable, self.command = variable, command
+        self.size = (width, height)
+        self._hover = -1
+        self._watch(variable, self._paint)
+        for sequence, handler in (("<Motion>", self._move), ("<Leave>", self._leave),
+                                  ("<ButtonRelease-1>", self._click),
+                                  ("<KeyPress-Left>", lambda _e: self._step(-1)),
+                                  ("<KeyPress-Right>", lambda _e: self._step(1))):
+            self.bind(sequence, handler)
+        self._paint()
+
+    def _bounds(self):
+        x = self._inset
+        for width in self._widths:
+            yield x, x + width
+            x += width
+
+    def _index_at(self, x: int) -> int:
+        for index, (left, right) in enumerate(self._bounds()):
+            if left <= x < right:
+                return index
+        return -1
+
+    def _paint(self) -> None:
+        p, kit, px = self.kit.p, self.kit, self.kit.px
+        self.delete("all")
+        width, height = self.size
+        self.create_image(0, 0, anchor="nw", image=kit.round_rect(width, height, px(8), p.field, p.border))
+        current = self.variable.get()
+        for index, ((value, text), (left, right)) in enumerate(zip(self.options, self._bounds())):
+            selected = value == current
+            if selected:
+                self.create_image(left, self._inset, anchor="nw", image=kit.round_rect(
+                    right - left, height - self._inset * 2, px(6), p.card, p.border_strong))
+            color = p.text if selected or index == self._hover else p.muted
+            self.create_text((left + right) / 2, height / 2, text=text, fill=color,
+                             font=kit.fonts["bold" if selected else "caption"])
+
+    def _choose(self, index: int) -> None:
+        if 0 <= index < len(self.options):
+            value = self.options[index][0]
+            if value != self.variable.get():
+                self.variable.set(value)
+                if self.command:
+                    self.command()
+
+    def _click(self, event) -> None:
+        self.focus_set()
+        self._choose(self._index_at(event.x))
+
+    def _step(self, direction: int) -> None:
+        values = [value for value, _text in self.options]
+        current = values.index(self.variable.get()) if self.variable.get() in values else 0
+        self._choose(max(0, min(len(values) - 1, current + direction)))
+
+    def _move(self, event) -> None:
+        index = self._index_at(event.x)
+        if index != self._hover:
+            self._hover = index
+            self._paint()
+
+    def _leave(self, _event) -> None:
+        self._hover = -1
+        self._paint()
+
+
+# ---------------------------------------------------------------------------
 class Pill(_CanvasWidget):
     """小標籤(例如「尚未套用」)。沒有文字時不佔空間。"""
 
@@ -621,9 +700,10 @@ class ScrollArea(tk.Frame):
         self.bar.bind("<ButtonPress-1>", self._bar_press)
         self.bar.bind("<B1-Motion>", self._bar_drag)
         # 滾輪事件掛在整個程式上,再看滑鼠是不是在這個區域裡
-        # (Enter/Leave 在滑進子元件時也會觸發,不可靠)
+        # (Enter/Leave 在滑進子元件時也會觸發,不可靠)。
+        # 用取代而不是附加:介面重建時,新的捲動區會蓋掉舊的(舊的已經不存在)。
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.bind_all(sequence, self._wheel, add="+")
+            self.bind_all(sequence, self._wheel)
 
     def _on_inner(self, _event) -> None:
         self.canvas.configure(scrollregion=(0, 0, self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()))

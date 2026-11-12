@@ -69,6 +69,41 @@ class GuiTests(unittest.TestCase):
             app, _ = self._make_app()
         self.assertIs(app.kit.p, style.DARK)
 
+    def test_appearance_can_be_switched_from_the_window(self):
+        from deskisle.ui import style
+        with mock.patch.dict(os.environ, {"DESKISLE_APPEARANCE": ""}):
+            app, root = self._make_app()
+            app.show_page("運作")
+            app.var_seed.set(321)                          # 還沒套用的外觀,重建後要留著
+            target = "light" if app.kit.p.dark else "dark"
+            app.var_appearance.set(target)
+            app._appearance_changed()
+            root.update()
+            self.assertIs(app.kit.p, style.DARK if target == "dark" else style.LIGHT)
+            self.assertEqual(app.applied.appearance, target)
+            self.assertEqual(app.current_page, "運作")
+            self.assertEqual(app.var_seed.get(), 321)
+            self.assertEqual(app.applied.seed, Config().seed)
+            self.assertEqual(app.page_names(), ["外觀", "螢幕", "運作", "測試"])
+
+    def test_segmented_control_chooses_by_click_and_keyboard(self):
+        import tkinter as tk
+        from deskisle.ui import style
+        from deskisle.ui.widgets import Kit, Segmented
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        var = tk.StringVar(value="a")
+        changes = []
+        control = Segmented(root, Kit(root, style.LIGHT), (("a", "甲"), ("b", "乙"), ("c", "丙")), var,
+                            lambda: changes.append(var.get()))
+        left, right = list(control._bounds())[2]
+        control._click(mock.Mock(x=(left + right) // 2))
+        control._step(-1)
+        control._step(-1)
+        control._step(-1)                                   # 已經是第一個,不會再變
+        self.assertEqual(changes, ["c", "b", "a"])
+
     def test_controls_round_trip_the_config(self):
         app, _ = self._make_app()
         self.assertEqual(app.draft_config(), Config())

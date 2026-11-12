@@ -43,7 +43,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_bad_values_are_rejected(self):
         for bad in ({"theme": "nope"}, {"margin": 0}, {"seed": "abc"}, {"poll_interval": 0},
-                    {"follow": "yes"}, {"margin": True}, {"decorations": -1}, {"idle_interval": 0}):
+                    {"follow": "yes"}, {"margin": True}, {"decorations": -1}, {"idle_interval": 0},
+                    {"appearance": "purple"}):
             self.path.write_text(json.dumps(bad), encoding="utf-8")
             with self.assertRaises(ValueError, msg=str(bad)):
                 load_config(self.path)
