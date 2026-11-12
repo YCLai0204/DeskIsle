@@ -306,14 +306,14 @@ class GuiTests(unittest.TestCase):
 
     def test_source_build_has_the_test_page(self):
         app, _ = self._make_app()
-        self.assertEqual(self._pages(app), ["外觀", "運作", "測試"])
+        self.assertEqual(self._pages(app), ["外觀", "螢幕", "運作", "測試"])
         self.assertTrue(app.has_test_page)
 
     def test_packaged_build_has_no_test_page(self):
         from deskisle import gui
         with mock.patch.object(gui, "is_frozen", lambda: True):
             app, _ = self._make_app()
-        self.assertEqual(self._pages(app), ["外觀", "運作"])
+        self.assertEqual(self._pages(app), ["外觀", "螢幕", "運作"])
         self.assertFalse(app.has_test_page)
 
     def test_controls_round_trip_the_config(self):
@@ -335,6 +335,15 @@ class GuiTests(unittest.TestCase):
         app._behavior_changed()
         self.assertEqual(app.applied.theme, "beach")
         self.assertFalse(app.applied.pause_when_busy)
+
+    def test_theme_chips_choose_the_theme_and_highlight_it(self):
+        from deskisle import ui_style
+        app, _ = self._make_app()
+        self.assertEqual(len(app._theme_chips), len(app._theme_names))
+        app._choose_theme("volcano")
+        self.assertEqual(app.draft_config().theme, "volcano")
+        self.assertEqual(str(app._theme_chips["volcano"].cget("highlightbackground")), ui_style.ACCENT)
+        self.assertEqual(str(app._theme_chips["beach"].cget("highlightbackground")), ui_style.CARD)
 
     def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
         app, root = self._make_app()

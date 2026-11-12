@@ -27,6 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from . import APP_NAME, __version__, autostart, is_frozen, tray, wallpaper, winapi
 from . import screens as screen_api
+from . import ui_style
 from .config import Config, app_dir, load_config, save_config
 from .icons import read_layout
 from .layout import DesktopLayout, Screen
@@ -172,15 +173,30 @@ class App:
         image.save(buffer, "PNG")
         return base64.b64encode(buffer.getvalue())
 
+    def _px(self, value: float) -> int:
+        """以 100% 縮放為準的像素,換成目前縮放比例下的像素。"""
+        return int(round(value * self._scale))
+
     def _build_ui(self) -> None:
         root = self.root
-        self.preview_width = int(min(900, PREVIEW_WIDTH * winapi.ui_scale()))
-        root.columnconfigure(1, weight=1)
-        root.rowconfigure(0, weight=1)
+        self._scale = winapi.ui_scale()
+        self.fonts = ui_style.setup(root, self._scale)
+        px = self._px
+        self.preview_width = int(min(900, PREVIEW_WIDTH * self._scale))
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(1, weight=1)
 
-        self.notebook = ttk.Notebook(root)
-        self.notebook.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=10)
+        self._build_header()
+
+        body = ttk.Frame(root, style="App.TFrame", padding=(px(16), px(14), px(16), px(8)))
+        body.grid(row=1, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        self.notebook = ttk.Notebook(body)
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=(0, px(14)))
         self._build_look_page()
+        self._build_screens_page()
         self._build_behavior_page()
         self.has_test_page = False
         if not is_frozen():
@@ -192,32 +208,101 @@ class App:
             except ImportError:
                 pass
 
-        right = ttk.Frame(root)
-        right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
+        # ---- 右邊:預覽卡片 + 按鈕
+        right = ttk.Frame(body, style="App.TFrame")
+        right.grid(row=0, column=1, sticky="nsew", pady=(px(37), 0))   # 跟分頁內容的上緣對齊
         right.columnconfigure(0, weight=1)
-        ttk.Label(right, text="預覽(依照你目前的桌面圖示位置)").grid(row=0, column=0, sticky="w")
-        self.preview_label = ttk.Label(right, anchor="center", relief="sunken", text="正在產生預覽…")
-        self.preview_label.grid(row=1, column=0, sticky="nsew", pady=(4, 6))
-        right.rowconfigure(1, weight=1)
-        self.pending_label = ttk.Label(right, text="", foreground="#b06000")
-        self.pending_label.grid(row=2, column=0, sticky="w")
 
-        buttons = ttk.Frame(right)
-        buttons.grid(row=3, column=0, sticky="ew", pady=(6, 0))
-        self.apply_button = ttk.Button(buttons, text="套用到桌布", command=self.apply_now)
+        card = ttk.Frame(right, style="Card.TFrame", padding=px(16))
+        card.grid(row=0, column=0, sticky="new")
+        card.columnconfigure(0, weight=1)
+        ttk.Label(card, text="預覽", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        self.pending_label = ttk.Label(card, text="", style="Warn.TLabel")
+        self.pending_label.grid(row=0, column=1, sticky="e")
+        ttk.Label(card, text="依照你目前的桌面圖示位置繪製,調整設定時即時更新,不會動到桌布。",
+                  style="Muted.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, px(10)))
+        monitor = ttk.Frame(card, style="Screen.TFrame", padding=px(8))
+        monitor.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        monitor.columnconfigure(0, weight=1)
+        monitor.rowconfigure(0, weight=1)
+        self.preview_label = ttk.Label(monitor, style="Screen.TLabel", text="正在產生預覽…")
+        self.preview_label.grid(row=0, column=0, sticky="nsew")
+        # 螢幕底座
+        stand = tk.Frame(card, background=ui_style.CARD)
+        stand.grid(row=3, column=0, columnspan=2)
+        tk.Frame(stand, background=ui_style.SCREEN, width=px(70), height=px(10)).pack()
+        tk.Frame(stand, background=ui_style.BORDER, width=px(150), height=px(4)).pack()
+
+        buttons = ttk.Frame(card)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(px(18), 0))
+        self.apply_button = ttk.Button(buttons, text="套用到桌布", style="Accent.TButton", command=self.apply_now)
         self.apply_button.pack(side="left")
-        ttk.Button(buttons, text="還原原本桌布", command=self.restore_wallpaper).pack(side="left", padx=8)
-        ttk.Button(buttons, text="結束程式", command=self.quit).pack(side="right")
+        ttk.Button(buttons, text="還原原本桌布", command=self.restore_wallpaper).pack(side="left", padx=px(10))
+        ttk.Button(buttons, text="結束程式", style="Ghost.TButton", command=self.quit).pack(side="right")
 
+        # ---- 狀態列
+        bar = ttk.Frame(root, style="App.TFrame", padding=(px(18), px(6), px(18), px(10)))
+        bar.grid(row=2, column=0, sticky="ew")
         self.status_var = tk.StringVar(value="")
-        ttk.Label(root, textvariable=self.status_var, relief="sunken", anchor="w", padding=(6, 2)).grid(
-            row=1, column=0, columnspan=2, sticky="ew")
+        ttk.Label(bar, textvariable=self.status_var, style="App.TLabel", anchor="w").pack(fill="x")
+
+        root.update_idletasks()
+        root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
+
+    def _build_header(self) -> None:
+        """上方的標題列:程式圖示、名稱、標語,右邊顯示自動跟隨的狀態。"""
+        px = self._px
+        height = px(78)
+        canvas = tk.Canvas(self.root, height=height, highlightthickness=0, borderwidth=0,
+                           background=ui_style.ACCENT)
+        canvas.grid(row=0, column=0, sticky="ew")
+        self._banner = tk.PhotoImage(data=self._png_b64(ui_style.banner(px(2400), height)))
+        canvas.create_image(0, 0, image=self._banner, anchor="nw")
+        self._header_icon = tk.PhotoImage(data=self._png_b64(tray.make_icon(px(46))))
+        canvas.create_image(px(22), height // 2 - px(1), image=self._header_icon, anchor="w")
+        canvas.create_text(px(80), height // 2 - px(11), text=f"{APP_NAME} 桌島", anchor="w",
+                           fill="white", font=self.fonts["title"])
+        canvas.create_text(px(81), height // 2 + px(15), text="你的檔案,就是島嶼。", anchor="w",
+                           fill="#cfe6f2", font=self.fonts["subtitle"])
+        self._header_state = canvas.create_text(0, height // 2 - px(8), anchor="e", text="",
+                                                fill="white", font=self.fonts["bold"])
+        self._header_version = canvas.create_text(0, height // 2 + px(14), anchor="e",
+                                                  text=f"版本 {__version__}", fill="#9fc9df",
+                                                  font=self.fonts["small"])
+
+        def place(event):
+            canvas.coords(self._header_state, event.width - px(24), height // 2 - px(8))
+            canvas.coords(self._header_version, event.width - px(24), height // 2 + px(14))
+
+        canvas.bind("<Configure>", place)
+        self.header = canvas
+
+    def _set_header_state(self, state: str, text: str = "") -> None:
+        color = {"following": "#9ff0c8", "paused": "#ffd88a", "error": "#ffb4a8"}.get(state, "#cfe6f2")
+        dot = "○" if state == "stopped" else "●"
+        self.header.itemconfigure(self._header_state, text=f"{dot} {text or STATE_TEXT.get(state, state)}",
+                                  fill=color)
+
+    # ---------------------------------------------------------------- 共用元件
+    def _page(self, title: str) -> ttk.Frame:
+        page = ttk.Frame(self.notebook, padding=(self._px(18), self._px(14)))
+        self.notebook.add(page, text=title)
+        page.columnconfigure(1, weight=1)
+        return page
+
+    def _section(self, parent, row: int, title: str, hint: str = "", first: bool = False) -> None:
+        ttk.Label(parent, text=title, style="Section.TLabel").grid(
+            row=row, column=0, columnspan=3, sticky="w", pady=(0 if first else self._px(16), 0))
+        if hint:
+            ttk.Label(parent, text=hint, style="Muted.TLabel", wraplength=self._px(340), justify="left").grid(
+                row=row + 1, column=0, columnspan=3, sticky="w", pady=(self._px(2), 0))
 
     def _slider(self, parent, row: int, label: str, variable, low: float, high: float,
                 fmt: str, command, hint: str = "") -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=(8, 0))
-        value_label = ttk.Label(parent, width=7, anchor="e")
-        value_label.grid(row=row, column=2, sticky="e", pady=(8, 0))
+        px = self._px
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=(px(10), 0))
+        value_label = ttk.Label(parent, width=6, anchor="e", style="Value.TLabel")
+        value_label.grid(row=row, column=2, sticky="e", pady=(px(10), 0))
 
         def changed(_value=None):
             value_label.configure(text=fmt.format(variable.get()))
@@ -225,62 +310,97 @@ class App:
                 command()
 
         ttk.Scale(parent, from_=low, to=high, variable=variable, command=changed).grid(
-            row=row, column=1, sticky="ew", padx=8, pady=(8, 0))
+            row=row, column=1, sticky="ew", padx=px(12), pady=(px(10), 0))
         self._value_refreshers.append(changed)
         if hint:
-            ttk.Label(parent, text=hint, foreground="#666666").grid(
+            ttk.Label(parent, text=hint, style="Muted.TLabel").grid(
                 row=row + 1, column=0, columnspan=3, sticky="w")
 
+    # ---------------------------------------------------------------- 外觀頁
     def _build_look_page(self) -> None:
         self._value_refreshers = []
-        page = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(page, text="外觀")
-        page.columnconfigure(1, weight=1)
+        px = self._px
+        page = self._page("外觀")
 
         self.var_theme = tk.StringVar()
         self._theme_names = {f"{t.label}({t.key})": t.key for t in THEMES.values()}
-        ttk.Label(page, text="主題").grid(row=0, column=0, sticky="w")
-        self.theme_box = ttk.Combobox(page, textvariable=self.var_theme, state="readonly",
-                                      values=list(self._theme_names), width=22)
-        self.theme_box.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(8, 0))
-        self.theme_box.bind("<<ComboboxSelected>>", lambda _e: self._look_changed())
-        self.theme_hint = ttk.Label(page, text="", foreground="#666666", wraplength=330, justify="left")
-        self.theme_hint.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        self._section(page, 0, "主題", first=True)
+        chips = ttk.Frame(page)
+        chips.grid(row=1, column=0, columnspan=3, sticky="w", pady=(px(8), 0))
+        self._theme_chips = {}
+        size = (px(84), px(48))
+        for index, theme in enumerate(THEMES.values()):
+            photo = tk.PhotoImage(data=self._png_b64(ui_style.theme_swatch(theme, size, size[0] / 420)))
+            chip = tk.Label(
+                chips, image=photo, text=theme.label, compound="top", cursor="hand2",
+                background=ui_style.CARD, foreground=ui_style.TEXT, font=self.fonts["small"],
+                borderwidth=0, highlightthickness=2, highlightbackground=ui_style.CARD, padx=2, pady=2,
+            )
+            chip.image = photo
+            chip.grid(row=index // 4, column=index % 4, padx=(0, px(6)), pady=(0, px(6)))
+            chip.bind("<Button-1>", lambda _e, key=theme.key: self._choose_theme(key))
+            self._theme_chips[theme.key] = chip
+        self.theme_hint = ttk.Label(page, text="", style="Muted.TLabel", wraplength=px(340), justify="left")
+        self.theme_hint.grid(row=2, column=0, columnspan=3, sticky="w")
 
         self.var_seed = tk.IntVar()
-        ttk.Label(page, text="海岸線形狀").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        self._section(page, 3, "海岸線")
         seed_row = ttk.Frame(page)
-        seed_row.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(10, 0))
+        seed_row.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(px(8), 0))
+        ttk.Label(seed_row, text="形狀編號").pack(side="left")
         seed_box = ttk.Spinbox(seed_row, from_=0, to=99999, textvariable=self.var_seed, width=8,
                                command=self._look_changed)
-        seed_box.pack(side="left")
+        seed_box.pack(side="left", padx=px(10))
         seed_box.bind("<Return>", lambda _e: self._look_changed())
         seed_box.bind("<FocusOut>", lambda _e: self._look_changed())
-        ttk.Button(seed_row, text="換一個", command=self._random_seed).pack(side="left", padx=8)
+        ttk.Button(seed_row, text="換一個", style="Small.TButton", command=self._random_seed).pack(side="left")
 
         self.var_margin = tk.DoubleVar()
         self.var_blend = tk.DoubleVar()
         self.var_roughness = tk.DoubleVar()
         self.var_decor = tk.DoubleVar()
-        self._slider(page, 3, "陸地留白", self.var_margin, 20, 110, "{:.0f}", self._look_changed,
+        self._slider(page, 6, "陸地留白", self.var_margin, 20, 110, "{:.0f}", self._look_changed,
                      "圖示外圍保留多寬的陸地")
-        self._slider(page, 5, "融合程度", self.var_blend, 8, 70, "{:.0f}", self._look_changed,
+        self._slider(page, 8, "融合程度", self.var_blend, 8, 70, "{:.0f}", self._look_changed,
                      "越大,相鄰的圖示越容易連成一片")
-        self._slider(page, 7, "海岸起伏", self.var_roughness, 0, 80, "{:.0f}", self._look_changed,
+        self._slider(page, 10, "海岸起伏", self.var_roughness, 0, 80, "{:.0f}", self._look_changed,
                      "海岸線的不規則程度(不會讓圖示掉進水裡)")
-        self._slider(page, 9, "裝飾物數量", self.var_decor, 0, 2, "{:.1f}", self._look_changed,
+        self._section(page, 12, "裝飾物")
+        self._slider(page, 13, "數量", self.var_decor, 0, 2, "{:.1f}", self._look_changed,
                      "0 = 不放裝飾物,1 = 標準,2 = 兩倍")
-        ttk.Button(page, text="恢復預設外觀", command=self._reset_look).grid(
-            row=11, column=0, columnspan=3, sticky="w", pady=(16, 0))
+        ttk.Button(page, text="恢復預設外觀", style="Small.TButton", command=self._reset_look).grid(
+            row=15, column=0, columnspan=3, sticky="w", pady=(px(18), 0))
 
-        self.screen_box = ttk.LabelFrame(page, text="要更新的螢幕", padding=8)
-        self.screen_box.grid(row=12, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+    def _choose_theme(self, key: str) -> None:
+        for name, value in self._theme_names.items():
+            if value == key:
+                self.var_theme.set(name)
+        self._look_changed()
+
+    def _refresh_theme_chips(self) -> None:
+        current = self._theme_key()
+        for key, chip in self._theme_chips.items():
+            selected = key == current
+            chip.configure(highlightbackground=ui_style.ACCENT if selected else ui_style.CARD,
+                           foreground=ui_style.ACCENT if selected else ui_style.TEXT,
+                           font=self.fonts["bold"] if selected else self.fonts["small"])
+
+    # ---------------------------------------------------------------- 螢幕頁
+    def _build_screens_page(self) -> None:
+        page = self._page("螢幕")
+        self._section(page, 0, "要更新的螢幕", "勾選要換桌布的螢幕,橫向、直向都可以。"
+                      "沒勾選的螢幕維持原本的桌布。改完按「套用到桌布」生效。", first=True)
+        self.screen_box = ttk.Frame(page)
+        self.screen_box.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(self._px(12), 0))
+        ttk.Label(page, text="預覽中每個螢幕左上角的編號,就是這裡的「螢幕 N」;"
+                             "沒勾選的螢幕在預覽裡是灰色斜線。",
+                  style="Muted.TLabel", wraplength=self._px(340), justify="left").grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(self._px(14), 0))
         self._screens: Tuple[Screen, ...] = ()
         self._screen_vars = {}
         self._screen_choice: Tuple[str, ...] = self.applied.screens
         self._set_screens(self._current_screens())
 
-    # ---------------------------------------------------------------- 螢幕選擇
     @staticmethod
     def _current_screens() -> Tuple[Screen, ...]:
         try:
@@ -309,13 +429,14 @@ class App:
             else:
                 box.state(["disabled"])
         if len(screens) <= 1:
-            hint = "只有一個螢幕。"
+            hint = "目前只偵測到一個螢幕。"
         elif choosable:
-            hint = "可以只更新部分螢幕(直向、橫向都可以),沒勾選的螢幕維持原本的桌布。"
+            hint = ""
         else:
             hint = "這台電腦無法各自設定每個螢幕,會把所有螢幕畫成一張圖。"
-        ttk.Label(self.screen_box, text=hint, foreground="#666666", wraplength=320, justify="left").grid(
-            row=len(screens), column=0, sticky="w", pady=(4, 0))
+        if hint:
+            ttk.Label(self.screen_box, text=hint, style="Muted.TLabel", wraplength=self._px(340),
+                      justify="left").grid(row=len(screens), column=0, sticky="w", pady=(self._px(4), 0))
         self._sync_screen_vars()
 
     def _sync_screen_vars(self) -> None:
@@ -337,10 +458,10 @@ class App:
         self._screen_choice = () if everything and not missing else tuple(checked) + missing
         self._look_changed()
 
+    # ---------------------------------------------------------------- 運作頁
     def _build_behavior_page(self) -> None:
-        page = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(page, text="運作")
-        page.columnconfigure(1, weight=1)
+        px = self._px
+        page = self._page("運作")
 
         self.var_follow = tk.BooleanVar()
         self.var_pause = tk.BooleanVar()
@@ -350,31 +471,32 @@ class App:
         self.var_idle = tk.DoubleVar()
         self.var_debounce = tk.DoubleVar()
 
+        self._section(page, 0, "自動更新", first=True)
         ttk.Checkbutton(page, text="自動跟隨桌面圖示(圖示移動後自動重畫桌布)",
                         variable=self.var_follow, command=self._follow_toggled).grid(
-            row=0, column=0, columnspan=3, sticky="w")
+            row=1, column=0, columnspan=3, sticky="w", pady=(px(6), 0))
         ttk.Checkbutton(page, text="圖示移動後換一種海岸線形狀(每次都不一樣)",
                         variable=self.var_reseed, command=self._behavior_changed).grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(page, text="全螢幕程式執行或螢幕鎖定時暫停",
-                        variable=self.var_pause, command=self._behavior_changed).grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            row=2, column=0, columnspan=3, sticky="w")
         ttk.Checkbutton(page, text="開機時自動啟動(縮在系統匣)",
                         variable=self.var_autostart, command=self._autostart_toggled).grid(
-            row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            row=3, column=0, columnspan=3, sticky="w")
 
-        ttk.Separator(page).grid(row=4, column=0, columnspan=3, sticky="ew", pady=12)
-        self._slider(page, 5, "檢查間隔", self.var_poll, 0.5, 5, "{:.1f} 秒", self._behavior_changed,
+        self._section(page, 4, "省電")
+        ttk.Checkbutton(page, text="全螢幕程式執行或螢幕鎖定時暫停",
+                        variable=self.var_pause, command=self._behavior_changed).grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(px(6), 0))
+        self._slider(page, 6, "檢查間隔", self.var_poll, 0.5, 5, "{:.1f} 秒", self._behavior_changed,
                      "你正對著桌面時,多久檢查一次圖示位置")
-        self._slider(page, 7, "背景檢查間隔", self.var_idle, 1, 30, "{:.0f} 秒", self._behavior_changed,
+        self._slider(page, 8, "背景檢查", self.var_idle, 1, 30, "{:.0f} 秒", self._behavior_changed,
                      "你在用其他視窗時,多久檢查一次")
-        self._slider(page, 9, "穩定等待", self.var_debounce, 0.2, 3, "{:.1f} 秒", self._behavior_changed,
+        self._slider(page, 10, "穩定等待", self.var_debounce, 0.2, 3, "{:.1f} 秒", self._behavior_changed,
                      "圖示停止移動多久後才重畫")
         ttk.Label(
-            page, foreground="#666666", wraplength=330, justify="left",
+            page, style="Muted.TLabel", wraplength=px(340), justify="left",
             text="間隔越長越省電。桌布是靜態圖片,平常不使用顯示卡;"
-                 "只有圖示排列改變時才會花約半秒重畫一次。",
-        ).grid(row=11, column=0, columnspan=3, sticky="w", pady=(14, 0))
+                 "只有圖示排列改變時才會花約半秒重畫一次。這一頁的設定改了立刻生效。",
+        ).grid(row=12, column=0, columnspan=3, sticky="w", pady=(px(16), 0))
 
     # ---------------------------------------------------------------- 設定值
     def _load_controls(self, config: Config) -> None:
@@ -395,6 +517,8 @@ class App:
         self.var_poll.set(config.poll_interval)
         self.var_idle.set(config.idle_interval)
         self.var_debounce.set(config.debounce)
+        self._set_header_state("following" if config.follow else "stopped",
+                               "" if config.follow else "未開啟自動跟隨")
         try:
             self.var_autostart.set(autostart.is_enabled())
         except OSError:
@@ -405,6 +529,7 @@ class App:
         for refresh in self._value_refreshers:
             refresh()
         self.theme_hint.configure(text=get_theme(self._theme_key()).description)
+        self._refresh_theme_chips()
 
     def _theme_key(self) -> str:
         return self._theme_names.get(self.var_theme.get(), self.applied.theme)
@@ -482,6 +607,7 @@ class App:
         else:
             self._behavior_changed()
             self.watcher.stop(wait=False)
+            self._set_header_state("stopped", "未開啟自動跟隨")
             self.set_status("已停止跟隨。桌布會維持現在的樣子。")
         if self.tray:
             self.tray.refresh()
@@ -631,6 +757,8 @@ class App:
         self._save()
 
     def _show_watch_status(self, status: WatchStatus) -> None:
+        if status.state != "stopped" or not self.var_follow.get():
+            self._set_header_state(status.state, "" if status.state != "stopped" else "未開啟自動跟隨")
         parts = [STATE_TEXT.get(status.state, status.state)]
         if status.message:
             parts.append(status.message)
