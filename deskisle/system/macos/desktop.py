@@ -260,6 +260,20 @@ def ui_scale() -> float:
     return 1.0
 
 
+def prefers_dark() -> bool:
+    """系統外觀是不是深色。"""
+    try:
+        done = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.stdout.strip().lower() == "dark"
+
+
+def style_title_bar(window_id: int, dark: bool, caption: str = "", text: str = "") -> None:
+    """macOS 的標題列會自己跟著系統外觀,不需要設定。"""
+
+
 def desktop_is_foreground() -> bool:
     """Mac 上沒變動時讀取幾乎不花成本,一律以「正對桌面」的間隔檢查。"""
     return True

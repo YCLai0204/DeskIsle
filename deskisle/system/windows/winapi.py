@@ -170,6 +170,47 @@ def ui_scale() -> float:
     return max(dpi, 96) / 96.0
 
 
+def prefers_dark() -> bool:
+    """「設定 → 個人化 → 色彩」的應用程式模式是不是深色。"""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+    except OSError:
+        return False
+
+
+user32.GetParent.argtypes = [wintypes.HWND]
+user32.GetParent.restype = wintypes.HWND
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+DWMWA_CAPTION_COLOR = 35      # Windows 11 才有;舊版會回傳錯誤,忽略即可
+DWMWA_TEXT_COLOR = 36
+
+
+def style_title_bar(window_id: int, dark: bool, caption: str = "", text: str = "") -> None:
+    """讓視窗標題列跟介面配色一致:深色模式、標題列底色與文字顏色(#rrggbb)。
+
+    window_id 是 tkinter 的 winfo_id();真正的頂層視窗是它的父視窗。做不到就算了。
+    """
+    try:
+        dwmapi = ctypes.WinDLL("dwmapi")
+    except OSError:
+        return
+    hwnd = user32.GetParent(window_id) or window_id
+
+    def set_attribute(attribute: int, value: int) -> None:
+        data = wintypes.DWORD(value)
+        dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), wintypes.DWORD(attribute),
+                                     ctypes.byref(data), ctypes.sizeof(data))
+
+    set_attribute(DWMWA_USE_IMMERSIVE_DARK_MODE, 1 if dark else 0)
+    for attribute, color in ((DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text)):
+        if color:
+            r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+            set_attribute(attribute, r | (g << 8) | (b << 16))   # COLORREF 是 0x00BBGGRR
+
+
 def virtual_screen() -> tuple:
     """整個虛擬桌面(所有螢幕的外接矩形):(x, y, 寬, 高)。"""
     enable_dpi_awareness()

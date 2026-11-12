@@ -1,37 +1,89 @@
-"""設定介面的外觀:配色、字型、ttk 樣式,以及標題列與主題縮圖。
+"""設定介面的外觀:配色(淺色/深色)、字型,以及用 Pillow 畫的圖。
 
-全部用 tkinter 內建的 ttk("clam" 為底)加上 Pillow 畫的圖,不需要額外套件。
+tkinter 畫不出反鋸齒的圓角與圓形,所以圓角、開關、滑桿圓鈕、圖示都先用 Pillow
+以 4 倍大小畫好再縮小,做成圖片貼到 Canvas 上(快取在 widgets.Kit,同樣的圖只畫一次)。
+不需要額外套件。
 """
 from __future__ import annotations
 
-import math
 import sys
 import tkinter as tk
+from dataclasses import dataclass
 from tkinter import font as tkfont
-from tkinter import ttk
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from PIL import Image, ImageDraw
 
 from ..engine.render import render
 from ..engine.themes import Theme
 
-# ---- 配色(取自程式圖示:深海藍 → 淺灘 → 沙灘) ------------------------------
-BG = "#eef3f7"            # 視窗底色
-CARD = "#ffffff"          # 卡片
-BORDER = "#d8e1e9"
-TEXT = "#1c2a35"
-MUTED = "#6a7b89"
-ACCENT = "#1474b0"
-ACCENT_DARK = "#0e5b8c"
-ACCENT_SOFT = "#e2eff8"
-WARN = "#b5650a"
-OK = "#2f9e6a"
-SCREEN = "#16212b"        # 預覽外框(像一台螢幕)
+SUPERSAMPLE = 4
+_RES = getattr(Image, "Resampling", Image)
 
+
+@dataclass(frozen=True)
+class Palette:
+    dark: bool
+    bg: str             # 內容區底色
+    sidebar: str        # 左側導覽列
+    card: str           # 卡片
+    card_hover: str
+    field: str          # 輸入框底色
+    border: str
+    border_strong: str
+    text: str
+    muted: str          # 說明文字
+    subtle: str         # 停用的文字
+    accent: str
+    accent_hover: str
+    accent_press: str
+    on_accent: str      # 強調色上的文字
+    accent_soft: str    # 選取項目的底色
+    nav_hover: str
+    nav_selected: str
+    track: str          # 滑桿軌道
+    ok: str
+    warn: str
+    warn_soft: str
+    danger: str
+    preview_bg: str     # 預覽圖還沒出來時的底色
+
+
+# 配色取自程式圖示:深海藍、淺灘、沙灘
+LIGHT = Palette(
+    dark=False, bg="#f3f5f8", sidebar="#e9edf2", card="#ffffff", card_hover="#f6f8fa", field="#f3f5f8",
+    border="#e1e6ec", border_strong="#c3ccd6", text="#17202a", muted="#5d6a79", subtle="#9aa5b1",
+    accent="#0f6fb5", accent_hover="#1b7cc2", accent_press="#0b5d98", on_accent="#ffffff",
+    accent_soft="#e4f0fa", nav_hover="#e0e6ed", nav_selected="#d5e0eb", track="#d5dce4",
+    ok="#1f9d68", warn="#a8650a", warn_soft="#fdf0d9", danger="#c4314b", preview_bg="#e8edf2",
+)
+DARK = Palette(
+    dark=True, bg="#0f141a", sidebar="#0a0e13", card="#161c24", card_hover="#1b232d", field="#0f141a",
+    border="#232c37", border_strong="#364250", text="#e6ecf2", muted="#8a97a6", subtle="#566170",
+    accent="#4cb0e6", accent_hover="#67bfee", accent_press="#3a9bd0", on_accent="#04192a",
+    accent_soft="#132b3c", nav_hover="#121820", nav_selected="#18212b", track="#2a3440",
+    ok="#3ccf8e", warn="#f0b44a", warn_soft="#33290f", danger="#f07167", preview_bg="#0b0f14",
+)
+
+
+# ---------------------------------------------------------------------------
+# 字型
+# ---------------------------------------------------------------------------
 _FONT_CANDIDATES = {
     "win32": ("Microsoft JhengHei UI", "Microsoft JhengHei", "Segoe UI"),
     "darwin": ("PingFang TC", "Heiti TC", "Helvetica Neue"),
+}
+_MONO_CANDIDATES = ("Cascadia Mono", "Consolas", "Menlo", "SF Mono", "Courier New")
+
+# 名稱 → (點數, 粗細)
+FONT_SPECS = {
+    "title": (19, "bold"),      # 頁面標題
+    "brand": (13, "bold"),      # 側邊欄的程式名稱
+    "h2": (11, "bold"),         # 區塊標題
+    "body": (10, "normal"),
+    "bold": (10, "bold"),
+    "caption": (9, "normal"),   # 說明文字
+    "small": (8, "normal"),
 }
 
 
@@ -43,148 +95,105 @@ def pick_font(root: tk.Misc) -> str:
     return tkfont.nametofont("TkDefaultFont").actual("family")
 
 
-def _hex(color: str) -> Tuple[int, int, int]:
-    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
-
-
-def checkbox_image(size: int, gap: int, fill: str, border: str, check: str = "") -> Image.Image:
-    """圓角方框的勾選框(右邊留 gap 的透明空白,當作與文字的間距)。"""
-    big = size * 4
-    image = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((2, 2, big - 3, big - 3), radius=big // 5, fill=_hex(fill) + (255,),
-                           outline=_hex(border) + (255,), width=max(4, big // 12))
-    if check:
-        draw.line([(big * 0.26, big * 0.52), (big * 0.43, big * 0.69), (big * 0.75, big * 0.33)],
-                  fill=_hex(check) + (255,), width=max(6, big // 8), joint="curve")
-    small = image.resize((size, size), getattr(Image, "Resampling", Image).LANCZOS)
-    canvas = Image.new("RGBA", (size + gap, size), (0, 0, 0, 0))
-    canvas.paste(small, (0, 0))
-    return canvas
-
-
-def _photo(image: Image.Image) -> tk.PhotoImage:
-    import base64
-    import io
-    buffer = io.BytesIO()
-    image.save(buffer, "PNG")
-    return tk.PhotoImage(data=base64.b64encode(buffer.getvalue()))
-
-
-def setup(root: tk.Tk, scale: float = 1.0) -> Dict[str, tuple]:
-    """設定整個視窗的 ttk 樣式;回傳常用字型。"""
+def make_fonts(root: tk.Misc) -> Dict[str, tkfont.Font]:
     family = pick_font(root)
-    fonts = {
-        "body": (family, 10),
-        "small": (family, 9),
-        "bold": (family, 10, "bold"),
-        "section": (family, 11, "bold"),
-        "title": (family, 17, "bold"),
-        "subtitle": (family, 10),
-    }
-    root.configure(background=BG)
-    root.option_add("*Font", fonts["body"])
-    root.option_add("*TCombobox*Listbox.font", fonts["body"])
-
-    style = ttk.Style(root)
-    style.theme_use("clam")
-    # 預設(分頁內容)是白色卡片
-    style.configure(".", background=CARD, foreground=TEXT, font=fonts["body"], bordercolor=BORDER,
-                    lightcolor=CARD, darkcolor=CARD, focuscolor=ACCENT, troughcolor=BORDER,
-                    selectbackground=ACCENT, selectforeground="white")
-    style.configure("App.TFrame", background=BG)
-    style.configure("App.TLabel", background=BG, foreground=MUTED, font=fonts["small"])
-    style.configure("Card.TFrame", background=CARD, relief="solid", borderwidth=1, bordercolor=BORDER)
-    style.configure("Muted.TLabel", foreground=MUTED, font=fonts["small"])
-    style.configure("Section.TLabel", foreground=TEXT, font=fonts["section"])
-    style.configure("Value.TLabel", foreground=ACCENT, font=fonts["bold"])
-    style.configure("Warn.TLabel", foreground=WARN, font=fonts["small"])
-    style.configure("Screen.TLabel", background=SCREEN, foreground="#b9c7d3", anchor="center")
-    style.configure("Screen.TFrame", background=SCREEN)
-
-    # 分頁
-    style.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 0, 0, 0))
-    style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(18, 8), borderwidth=0,
-                    font=fonts["bold"], lightcolor=BG, bordercolor=BG)
-    style.map("TNotebook.Tab",
-              background=[("selected", CARD), ("active", ACCENT_SOFT)],
-              foreground=[("selected", ACCENT)],
-              lightcolor=[("selected", CARD)], bordercolor=[("selected", BORDER)])
-
-    # 按鈕
-    style.configure("TButton", background=CARD, foreground=TEXT, padding=(14, 7), borderwidth=1,
-                    bordercolor=BORDER, lightcolor=CARD, darkcolor=CARD, focusthickness=0)
-    style.map("TButton", background=[("pressed", ACCENT_SOFT), ("active", ACCENT_SOFT)],
-              bordercolor=[("active", ACCENT)])
-    style.configure("Accent.TButton", background=ACCENT, foreground="white", padding=(20, 9),
-                    bordercolor=ACCENT, lightcolor=ACCENT, darkcolor=ACCENT, font=fonts["bold"])
-    style.map("Accent.TButton",
-              background=[("disabled", "#9dbfd6"), ("pressed", ACCENT_DARK), ("active", ACCENT_DARK)],
-              foreground=[("disabled", "#eef5fa")],
-              bordercolor=[("active", ACCENT_DARK)],
-              lightcolor=[("active", ACCENT_DARK)], darkcolor=[("active", ACCENT_DARK)])
-    style.configure("Ghost.TButton", background=CARD, foreground=MUTED, bordercolor=CARD,
-                    lightcolor=CARD, darkcolor=CARD, padding=(10, 7))
-    style.map("Ghost.TButton", foreground=[("active", "#b3261e")], background=[("active", CARD)],
-              bordercolor=[("active", CARD)])
-    style.configure("Small.TButton", padding=(10, 4))
-
-    # 勾選框:自己畫的圓角方框與打勾
-    size, gap = int(round(16 * scale)), int(round(8 * scale))
-    images = {
-        "off": checkbox_image(size, gap, CARD, "#a9b8c5"),
-        "hover": checkbox_image(size, gap, ACCENT_SOFT, ACCENT),
-        "on": checkbox_image(size, gap, ACCENT, ACCENT, "#ffffff"),
-        "on_hover": checkbox_image(size, gap, ACCENT_DARK, ACCENT_DARK, "#ffffff"),
-        "off_disabled": checkbox_image(size, gap, BG, BORDER),
-        "on_disabled": checkbox_image(size, gap, "#9dbfd6", "#9dbfd6", "#ffffff"),
-    }
-    photos = {key: _photo(image) for key, image in images.items()}
-    root._deskisle_style_images = photos   # 圖片要一直有人參考,不然會被回收
-    if "Pretty.Checkbutton.indicator" not in style.element_names():
-        style.element_create(
-            "Pretty.Checkbutton.indicator", "image", photos["off"],
-            ("disabled", "selected", photos["on_disabled"]), ("disabled", photos["off_disabled"]),
-            ("active", "selected", photos["on_hover"]), ("selected", photos["on"]),
-            ("active", photos["hover"]), sticky="w",
-        )
-    style.layout("TCheckbutton", [("Checkbutton.padding", {"sticky": "nswe", "children": [
-        ("Pretty.Checkbutton.indicator", {"side": "left", "sticky": ""}),
-        ("Checkbutton.label", {"side": "left", "sticky": "nswe"}),
-    ]})])
-    style.configure("TCheckbutton", background=CARD, padding=(0, 4))
-    style.map("TCheckbutton", background=[("active", CARD), ("disabled", CARD)],
-              foreground=[("disabled", MUTED), ("active", ACCENT)])
-
-    # 滑桿、輸入框
-    style.configure("Horizontal.TScale", background=ACCENT, troughcolor="#e4ebf1", bordercolor="#cfdae3",
-                    lightcolor=ACCENT, darkcolor=ACCENT, gripcount=0, sliderthickness=14)
-    style.map("Horizontal.TScale", background=[("active", ACCENT_DARK)])
-    style.configure("TSpinbox", fieldbackground=CARD, arrowcolor=MUTED, padding=(6, 3), arrowsize=12)
-    style.configure("TSeparator", background=BORDER)
-    style.configure("TLabelframe", background=CARD, bordercolor=BORDER)
-    style.configure("TLabelframe.Label", background=CARD, foreground=MUTED, font=fonts["bold"])
+    bump = 3 if sys.platform == "darwin" else 0     # macOS 的點數換算比較小
+    fonts = {name: tkfont.Font(root=root, family=family, size=size + bump, weight=weight)
+             for name, (size, weight) in FONT_SPECS.items()}
+    families = set(tkfont.families(root))
+    mono = next((name for name in _MONO_CANDIDATES if name in families), "Courier")
+    fonts["mono"] = tkfont.Font(root=root, family=mono, size=9 + bump)
     return fonts
 
 
 # ---------------------------------------------------------------------------
 # 圖
 # ---------------------------------------------------------------------------
-def banner(width: int, height: int) -> Image.Image:
-    """標題列背景:由深海藍漸層到淺海,底部一道沙色細線。"""
-    left = (12, 70, 116)
-    right = (24, 140, 172)
-    image = Image.new("RGB", (width, height))
-    draw = ImageDraw.Draw(image)
-    for x in range(width):
-        t = x / max(1, width - 1)
-        draw.line((x, 0, x, height), fill=tuple(int(a + (b - a) * t) for a, b in zip(left, right)))
-    # 兩道淡淡的浪
-    for i, y in enumerate((0.62, 0.80)):
-        points = [(x, height * y + 3 * math.sin(x / (38 + 9 * i))) for x in range(0, width + 4, 4)]
-        draw.line(points, fill=(52, 148, 184), width=1)
-    draw.rectangle((0, height - 3, width, height), fill=(232, 207, 150))
-    return image
+def rgba(color: str, alpha: int = 255) -> Tuple[int, int, int, int]:
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5)) + (alpha,)
+
+
+def _big(width: int, height: int):
+    image = Image.new("RGBA", (max(1, width) * SUPERSAMPLE, max(1, height) * SUPERSAMPLE), (0, 0, 0, 0))
+    return image, ImageDraw.Draw(image)
+
+
+def _small(image: Image.Image, width: int, height: int) -> Image.Image:
+    return image.resize((max(1, width), max(1, height)), _RES.LANCZOS)
+
+
+def round_rect(width: int, height: int, radius: float, fill: Optional[str] = None,
+               outline: Optional[str] = None, line: int = 1) -> Image.Image:
+    """反鋸齒的圓角矩形(外面透明)。outline 的線寬 line 往內畫。"""
+    image, draw = _big(width, height)
+    k = SUPERSAMPLE
+    radius = max(0.0, min(radius, width / 2, height / 2))
+    draw.rounded_rectangle((0, 0, width * k - 1, height * k - 1), radius=radius * k,
+                           fill=rgba(fill) if fill else None,
+                           outline=rgba(outline) if outline else None, width=line * k if outline else 0)
+    return _small(image, width, height)
+
+
+def rounded(image: Image.Image, radius: int) -> Image.Image:
+    """把圖片切成圓角(角落變透明)。"""
+    width, height = image.size
+    k = SUPERSAMPLE
+    mask = Image.new("L", (width * k, height * k), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, width * k - 1, height * k - 1), radius=radius * k, fill=255)
+    out = image.convert("RGBA")
+    out.putalpha(_small(mask, width, height))
+    return out
+
+
+def icon(name: str, size: int, color: str) -> Image.Image:
+    """線條圖示(以 24×24 的格子設計)。"""
+    image, draw = _big(size, size)
+    k = size * SUPERSAMPLE / 24
+    c = rgba(color)
+    w = max(SUPERSAMPLE, int(round(1.8 * k)))
+
+    def pts(*points):
+        return [(x * k, y * k) for x, y in points]
+
+    def box(x0, y0, x1, y1):
+        return (x0 * k, y0 * k, x1 * k, y1 * k)
+
+    if name == "look":            # 一張風景圖:外框、山、太陽
+        draw.rounded_rectangle(box(3, 4, 21, 20), radius=3 * k, outline=c, width=w)
+        draw.line(pts((4, 17), (9, 11.5), (13, 15.5), (16, 12.5), (20.5, 17)), fill=c, width=w, joint="curve")
+        draw.ellipse(box(14, 6.5, 17.6, 10.1), fill=c)
+    elif name == "screens":       # 螢幕
+        draw.rounded_rectangle(box(2.5, 4, 21.5, 16.5), radius=2.5 * k, outline=c, width=w)
+        draw.line(pts((12, 16.5), (12, 20)), fill=c, width=w)
+        draw.line(pts((8, 20.5), (16, 20.5)), fill=c, width=w)
+    elif name == "behavior":      # 三條滑桿
+        for y, x in ((6.5, 15), (12, 8), (17.5, 13)):
+            draw.line(pts((3, y), (21, y)), fill=c, width=w)
+            draw.ellipse(box(x - 2.6, y - 2.6, x + 2.6, y + 2.6), fill=c)
+    elif name == "test":          # 燒杯
+        draw.line(pts((9, 3.5), (9, 9.5), (4.5, 19), (5.6, 20.5), (18.4, 20.5), (19.5, 19), (15, 9.5), (15, 3.5)),
+                  fill=c, width=w, joint="curve")
+        draw.line(pts((7.5, 3.5), (16.5, 3.5)), fill=c, width=w)
+        draw.line(pts((6.6, 15), (17.4, 15)), fill=c, width=w)
+    elif name == "refresh":       # 繞一圈的箭頭
+        draw.arc(box(4, 4, 20, 20), 330, 630, fill=c, width=w)
+        draw.polygon(pts((10.6, 1.2), (15.6, 4), (10.6, 6.8)), fill=c)
+    elif name == "restore":       # 回上一步
+        draw.line(pts((4.5, 9), (14, 9)), fill=c, width=w)
+        draw.arc(box(8.5, 9, 19.5, 20), 270, 450, fill=c, width=w)
+        draw.line(pts((14, 20), (9, 20)), fill=c, width=w)
+        draw.line(pts((8.5, 4.8), (4.3, 9), (8.5, 13.2)), fill=c, width=w, joint="curve")
+    elif name == "power":         # 電源
+        draw.arc(box(4.5, 5, 19.5, 20), 300, 600, fill=c, width=w)
+        draw.line(pts((12, 3), (12, 11.5)), fill=c, width=w)
+    elif name == "check":
+        draw.line(pts((5, 12.5), (10, 17.5), (19.5, 7)), fill=c, width=int(w * 1.15), joint="curve")
+    elif name == "brush":         # 套用:畫筆
+        draw.line(pts((19.5, 4.5), (10.5, 13.5)), fill=c, width=w)
+        draw.ellipse(box(4, 13, 11.5, 20.5), fill=c)
+    else:
+        raise ValueError(name)
+    return _small(image, size, size)
 
 
 # 主題縮圖用的假圖示:左上一群、右下一個,看得出陸地與水
@@ -196,6 +205,5 @@ def theme_swatch(theme: Theme, size: Tuple[int, int], scale: float) -> Image.Ima
     """一張很小的主題示意圖(用固定的假圖示排列畫)。"""
     width, height = size
     rects = [(int(l * width), int(t * height), int(r * width), int(b * height)) for l, t, r, b in _SWATCH_RECTS]
-    image = render(width, height, rects, theme, margin=46, blend=26, roughness=22, seed=11,
-                   scale=scale, decorations=1.0)
-    return image
+    return render(width, height, rects, theme, margin=46, blend=26, roughness=22, seed=11,
+                  scale=scale, decorations=1.0)

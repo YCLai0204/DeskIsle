@@ -136,13 +136,13 @@ class RenderScreensTests(unittest.TestCase):
         self.assertEqual(seen, [((440, 220), 2)])
 
     def test_preview_marks_skipped_screens(self):
-        from deskisle.ui import app as gui
-        data = gui.render_preview(LAYOUT, Config(decorations=0, screens=("monitor-left",)), 220)
+        from deskisle.ui import preview
+        data = preview.render_preview(LAYOUT, Config(decorations=0, screens=("monitor-left",)), 220)
         image = Image.open(io.BytesIO(data)).convert("RGB")
         self.assertEqual(image.size, (220, 110))
         # 右邊的直向螢幕沒選 → 只有灰色與斜線兩種顏色
         colors = {image.getpixel((x, y)) for x in range(170, 215) for y in range(40, 100)}
-        self.assertTrue(colors <= {gui.PREVIEW_SKIPPED, gui.PREVIEW_GAP}, colors)
+        self.assertTrue(colors <= {preview.PREVIEW_SKIPPED, preview.PREVIEW_GAP}, colors)
 
 
 @unittest.skipUnless(WINDOWS, "需要 Windows")

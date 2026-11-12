@@ -16,8 +16,6 @@ import time
 import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
-from tkinter import ttk
-from tkinter.scrolledtext import ScrolledText
 
 from .. import __version__, system
 from ..config import app_dir
@@ -26,18 +24,17 @@ from ..engine.layout import DesktopIcon, DesktopLayout
 from ..engine.themes import THEMES
 from ..system import read_layout
 from ..watcher import render_layout
+from .widgets import Button, Card
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def add_test_page(app, notebook: ttk.Notebook) -> None:
-    page = ttk.Frame(notebook, padding=12)
-    notebook.add(page, text="測試")
-    page.columnconfigure(0, weight=1)
-    page.rowconfigure(6, weight=1)
+def add_test_page(app) -> None:
+    kit = app.kit
+    p, px = kit.p, kit.px
+    page = app.add_page("測試", "test", "只在以原始碼執行時出現;這一頁的功能都不會改動桌布。")
 
-    log_box = ScrolledText(page, width=44, height=12, wrap="word", state="disabled")
-
+    # log_box 在頁面最下面建立;這些函式要等按下按鈕才會用到它
     def log(text: str = "") -> None:
         def write():
             log_box.configure(state="normal")
@@ -59,20 +56,16 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
                 log(f"失敗:{exc}")
         threading.Thread(target=run, name="deskisle-test", daemon=True).start()
 
-    ttk.Label(page, text="這一頁只在開發時出現,所有功能都不會改動桌布。",
-              foreground="#666666").grid(row=0, column=0, sticky="w")
-
     # ---- 預覽控制 ----------------------------------------------------------
-    box = ttk.LabelFrame(page, text="預覽", padding=8)
-    box.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+    app.section(page, "預覽")
+    body = app.card(page)
     outline_var = tk.BooleanVar(value=False)
 
     def toggle_outline() -> None:
         app.debug_preview = outline_var.get()
         app.schedule_preview(10)
 
-    ttk.Checkbutton(box, text="在預覽上畫出圖示外框", variable=outline_var,
-                    command=toggle_outline).grid(row=0, column=0, columnspan=4, sticky="w")
+    app.toggle_row(body, "畫出圖示外框", "在預覽上標出偵測到的圖示範圍", outline_var, toggle_outline)
 
     count_var = tk.IntVar(value=25)
 
@@ -83,7 +76,11 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
         cols, rows = max(1, width // cell_w), max(1, (height - int(60 * scale)) // cell_h)
         cells = [(c, r) for c in range(cols) for r in range(rows)]
         rng = random.Random()
-        chosen = rng.sample(cells, min(len(cells), max(0, count_var.get())))
+        try:
+            count = max(0, int(count_var.get()))
+        except (tk.TclError, ValueError):
+            count = 25
+        chosen = rng.sample(cells, min(len(cells), count))
         icons = tuple(
             DesktopIcon(f"假圖示 {i}", c * cell_w, r * cell_h + int(5 * scale),
                         (c + 1) * cell_w, r * cell_h + int(5 * scale) + int(rng.choice((70, 85)) * scale))
@@ -98,16 +95,17 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
         app.schedule_preview(10)
         log("預覽改回真實桌面")
 
-    ttk.Label(box, text="假圖示數量").grid(row=1, column=0, sticky="w", pady=(6, 0))
-    ttk.Spinbox(box, from_=0, to=300, textvariable=count_var, width=5).grid(
-        row=1, column=1, sticky="w", padx=6, pady=(6, 0))
-    ttk.Button(box, text="隨機排列", command=fake_layout).grid(row=1, column=2, pady=(6, 0))
-    ttk.Button(box, text="回到真實桌面", command=real_layout).grid(row=1, column=3, padx=6, pady=(6, 0))
+    _line, slot = app.row(body, "假圖示", "用隨機排列的假圖示測試")
+    field = Card(slot, kit, padding=(8, 4), radius=7, fill=p.field, outline=p.border_strong)
+    field.pack(side="left")
+    tk.Entry(field.body, textvariable=count_var, width=4, relief="flat", borderwidth=0, highlightthickness=0,
+             background=p.field, foreground=p.text, insertbackground=p.text, font=kit.fonts["bold"],
+             justify="center").pack()
+    Button(slot, kit, "隨機排列", fake_layout, small=True).pack(side="left", padx=(px(8), 0))
+    _line, slot = app.row(body, "真實桌面", "預覽改回目前的桌面圖示")
+    Button(slot, kit, "回到真實桌面", real_layout, small=True).pack()
 
     # ---- 檢查工具 ----------------------------------------------------------
-    tools = ttk.LabelFrame(page, text="檢查", padding=8)
-    tools.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-
     def detect() -> None:
         def work():
             started = time.perf_counter()
@@ -174,16 +172,23 @@ def add_test_page(app, notebook: ttk.Notebook) -> None:
         log(f"資料夾 {app_dir()}")
         log(f"監看狀態 {app.watcher.status}")
         log(f"正對桌面 {system.desktop_is_foreground()},忙碌(全螢幕/鎖定){system.user_is_busy()}")
+        log(f"介面配色 {'深色' if p.dark else '淺色'}")
 
-    for column in range(3):
-        tools.columnconfigure(column, weight=1, uniform="tools")
-    for column, (text, command) in enumerate((
-        ("偵測圖示", detect), ("效能測試", benchmark), ("輸出全尺寸圖", export),
-    )):
-        ttk.Button(tools, text=text, command=command).grid(row=0, column=column, sticky="ew", padx=3)
-    for column, (text, command) in enumerate((
-        ("自動化測試", run_tests), ("環境資訊", info), ("清除紀錄", clear),
-    )):
-        ttk.Button(tools, text=text, command=command).grid(row=1, column=column, sticky="ew", padx=3, pady=(6, 0))
+    app.section(page, "檢查")
+    body = app.card(page, padding=(14, 14))
+    tools = (("偵測圖示", detect), ("效能測試", benchmark), ("輸出全尺寸圖", export),
+             ("自動化測試", run_tests), ("環境資訊", info), ("清除紀錄", clear))
+    for start in (0, 3):
+        line = tk.Frame(body, background=p.card)
+        line.pack(fill="x", pady=(0 if start == 0 else px(8), 0))
+        for text, command in tools[start:start + 3]:
+            Button(line, kit, text, command, small=True).pack(side="left", padx=(0, px(8)))
 
-    log_box.grid(row=6, column=0, sticky="nsew", pady=(8, 0))
+    # ---- 紀錄 --------------------------------------------------------------
+    app.section(page, "紀錄")
+    log_card = Card(page, kit, padding=(12, 10))
+    log_card.pack(fill="x")
+    log_box = tk.Text(log_card.body, height=14, wrap="word", state="disabled", relief="flat", borderwidth=0,
+                      highlightthickness=0, background=p.card, foreground=p.text, insertbackground=p.text,
+                      selectbackground=p.accent, selectforeground=p.on_accent, font=kit.fonts["mono"])
+    log_box.pack(fill="both", expand=True)

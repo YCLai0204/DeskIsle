@@ -1,10 +1,11 @@
-"""設定介面:分頁、設定值往返、主題選擇、預覽。
+"""設定介面:頁面、設定值往返、主題選擇、自繪元件、預覽。
 
 介面以 headless 模式建立:不顯示、不啟動監看、不寫設定。
 
 執行:python -m unittest discover -s tests -v
 """
 
+import io
 import os
 import sys
 import tempfile
@@ -15,6 +16,7 @@ from unittest import mock
 from PIL import Image
 
 from deskisle.config import Config
+from deskisle.engine.layout import DesktopIcon, DesktopLayout
 
 WINDOWS = sys.platform == "win32"
 
@@ -26,7 +28,7 @@ class GuiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        env = mock.patch.dict(os.environ, {"LOCALAPPDATA": self.tmp.name})
+        env = mock.patch.dict(os.environ, {"LOCALAPPDATA": self.tmp.name, "DESKISLE_APPEARANCE": "light"})
         env.start()
         self.addCleanup(env.stop)
 
@@ -38,20 +40,34 @@ class GuiTests(unittest.TestCase):
         self.addCleanup(root.destroy)
         return gui.App(root, headless=True), root
 
-    def _pages(self, app):
-        return [app.notebook.tab(i, "text") for i in range(app.notebook.index("end"))]
-
     def test_source_build_has_the_test_page(self):
         app, _ = self._make_app()
-        self.assertEqual(self._pages(app), ["外觀", "螢幕", "運作", "測試"])
+        self.assertEqual(app.page_names(), ["外觀", "螢幕", "運作", "測試"])
         self.assertTrue(app.has_test_page)
 
     def test_packaged_build_has_no_test_page(self):
         from deskisle.ui import app as gui
         with mock.patch.object(gui, "is_frozen", lambda: True):
             app, _ = self._make_app()
-        self.assertEqual(self._pages(app), ["外觀", "螢幕", "運作"])
+        self.assertEqual(app.page_names(), ["外觀", "螢幕", "運作"])
         self.assertFalse(app.has_test_page)
+
+    def test_switching_pages_shows_one_page_and_selects_its_nav_item(self):
+        app, root = self._make_app()
+        app.show_page("運作")
+        root.update_idletasks()
+        self.assertEqual(app.current_page, "運作")
+        self.assertEqual(app.page_title.cget("text"), "運作")
+        self.assertEqual([name for name, page in app.pages.items() if page.winfo_manager()], ["運作"])
+        self.assertEqual([name for name, item in app._nav.items() if item.selected], ["運作"])
+
+    def test_appearance_follows_the_environment_override(self):
+        from deskisle.ui import style
+        app, _ = self._make_app()
+        self.assertIs(app.kit.p, style.LIGHT)
+        with mock.patch.dict(os.environ, {"DESKISLE_APPEARANCE": "dark"}):
+            app, _ = self._make_app()
+        self.assertIs(app.kit.p, style.DARK)
 
     def test_controls_round_trip_the_config(self):
         app, _ = self._make_app()
@@ -73,14 +89,50 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(app.applied.theme, "beach")
         self.assertFalse(app.applied.pause_when_busy)
 
-    def test_theme_chips_choose_the_theme_and_highlight_it(self):
-        from deskisle.ui import style as ui_style
+    def test_theme_tiles_choose_the_theme_and_highlight_it(self):
         app, _ = self._make_app()
-        self.assertEqual(len(app._theme_chips), len(app._theme_names))
-        app._choose_theme("volcano")
+        self.assertEqual(len(app._theme_tiles), len(app._theme_names))
+        app._theme_tiles["volcano"]._click()
         self.assertEqual(app.draft_config().theme, "volcano")
-        self.assertEqual(str(app._theme_chips["volcano"].cget("highlightbackground")), ui_style.ACCENT)
-        self.assertEqual(str(app._theme_chips["beach"].cget("highlightbackground")), ui_style.CARD)
+        self.assertEqual([key for key, tile in app._theme_tiles.items() if tile.selected], ["volcano"])
+        self.assertEqual(app.pending_pill.text, "尚未套用")
+
+    def test_toggle_flips_its_variable_and_both_follow_switches_agree(self):
+        from deskisle.ui.widgets import Toggle
+        app, _ = self._make_app()
+        switches = [w for w in _descendants(app.root) if isinstance(w, Toggle) and w.variable is app.var_follow]
+        self.assertEqual(len(switches), 2)            # 左下角一個,「運作」頁一個
+        switches[0]._click()
+        self.assertTrue(app.var_follow.get())
+        self.assertTrue(app.applied.follow)
+        self.assertEqual(app._state_text.cget("text"), "啟動中…")
+
+    def test_slider_sets_its_variable_from_the_pointer(self):
+        from deskisle.ui.widgets import Slider
+        app, root = self._make_app()
+        slider = next(w for w in _descendants(app.root) if isinstance(w, Slider) and w.variable is app.var_margin)
+        root.update_idletasks()
+        slider.configure(width=220)
+        slider.update_idletasks()
+        start, end = slider._ends()
+        slider._set_from(end + 50)                    # 拖過頭 → 最大值
+        self.assertEqual(app.draft_config().margin, 110)
+        slider._set_from(start)
+        self.assertEqual(app.draft_config().margin, 20)
+
+    def test_disabled_button_does_nothing(self):
+        import tkinter as tk
+        from deskisle.ui.widgets import Button, Kit
+        from deskisle.ui import style
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        clicks = []
+        button = Button(root, Kit(root, style.LIGHT), "按我", lambda: clicks.append(1), kind="primary")
+        button.invoke()
+        button.set_enabled(False)
+        button.invoke()
+        self.assertEqual(clicks, [1])
 
     def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
         app, root = self._make_app()
@@ -106,13 +158,24 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(list(Path(self.tmp.name).rglob("*")), [])
 
     def test_preview_is_a_png_of_the_requested_width(self):
-        import io
-        from deskisle.ui import app as gui
-        from deskisle.engine.layout import DesktopIcon, DesktopLayout
+        from deskisle.ui.preview import render_preview
         layout = DesktopLayout(1920, 1080, (DesktopIcon("a", 0, 5, 76, 75),))
-        data = gui.render_preview(layout, Config(theme="cosmos"), 320)
+        data = render_preview(layout, Config(theme="cosmos"), 320)
         image = Image.open(io.BytesIO(data))
         self.assertEqual(image.size, (320, 180))
+
+    def test_preview_fits_inside_its_box(self):
+        from deskisle.ui.preview import fit_width
+        wide = DesktopLayout(1920, 1080, ())
+        tall = DesktopLayout(1080, 1920, ())
+        self.assertEqual(fit_width(wide, 480, 400), 480)      # 寬度先用完
+        self.assertEqual(fit_width(tall, 480, 400), 225)      # 高度先用完
+
+
+def _descendants(widget):
+    for child in widget.winfo_children():
+        yield child
+        yield from _descendants(child)
 
 
 if __name__ == "__main__":
