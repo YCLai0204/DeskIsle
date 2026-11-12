@@ -12,7 +12,7 @@ from PIL import Image
 
 from deskisle.config import Config, load_config
 from deskisle.engine import decor, photo
-from deskisle.engine.render import object_rules, render
+from deskisle.engine.render import render
 from deskisle.engine.terrain import shore_field
 from deskisle.engine.themes import get_theme
 
@@ -171,16 +171,33 @@ class ObjectTests(unittest.TestCase):
         self.sprite = Image.new("RGBA", (40, 40), (255, 0, 255, 255))
         self.field = shore_field(640, 360, RECT, margin=46.0, blend=26.0, roughness=22.0, seed=7)
 
-    def test_objects_stay_in_their_zone(self):
-        for zone, check in (("water", lambda s: s >= 40), ("land", lambda s: s < -16)):
-            placed = decor.place(self.field, RECT, object_rules(2, zone, 3.0, 40), seed=1)
-            self.assertTrue(all(check(self.field[p.y, p.x]) for p in placed), zone)
-        self.assertGreater(len(decor.place(self.field, RECT, object_rules(2, "water", 3.0, 40), seed=1)), 0)
+    def _place(self, zone, amount=3.0, size=40, rects=RECT, field=None):
+        return decor.place_objects(self.field if field is None else field, rects, ["a", "b"], zone=zone,
+                                   amount=amount, size=size, seed=1)
 
-    def test_more_objects_with_a_higher_amount_and_none_at_zero(self):
-        few = decor.place(self.field, RECT, object_rules(1, "water", 0.5, 30), seed=1)
-        many = decor.place(self.field, RECT, object_rules(1, "water", 3.0, 30), seed=1)
+    def test_objects_stay_in_their_zone_and_off_the_icons(self):
+        for zone, check in (("water", lambda s: s >= 30), ("land", lambda s: s < 2)):
+            placed = self._place(zone)
+            self.assertGreater(len(placed), 0, zone)
+            for p in placed:
+                self.assertTrue(check(self.field[p.y, p.x]), zone)
+                left, top, right, bottom = RECT[0]
+                half = p.size / 2
+                self.assertFalse(p.x + half > left and p.x - half < right and p.y + half > top
+                                 and p.y - half < bottom)
+
+    def test_land_objects_fit_into_a_narrow_strip_around_crowded_icons(self):
+        # 一整排緊靠的圖示:陸地只剩外圍一圈窄窄的空地(使用者桌面常見的樣子)
+        rects = [(20 + 76 * c, 20 + 90 * r, 96 + 76 * c, 100 + 90 * r) for c in range(2) for r in range(3)]
+        field = shore_field(640, 360, rects, margin=46.0, blend=26.0, roughness=22.0, seed=7)
+        placed = self._place("land", amount=3.0, size=64, rects=rects, field=field)
+        self.assertGreater(len(placed), 0)
+        self.assertTrue(all(field[p.y, p.x] < 2 for p in placed))
+
+    def test_amount_sets_how_many(self):
+        few, many = self._place("water", amount=1.0), self._place("water", amount=3.0)
         self.assertLess(len(few), len(many))
+        self.assertEqual(self._place("water", amount=0), [])
         plain = render(640, 360, RECT, get_theme("beach"), seed=3, decorations=0)
         none = render(640, 360, RECT, get_theme("beach"), seed=3, decorations=0, objects=[self.sprite],
                       objects_amount=0)

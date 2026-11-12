@@ -48,15 +48,6 @@ def _add_sparkles(rgb: np.ndarray, s: np.ndarray, theme: Theme, seed: int, scale
         rgb[by, bx] = np.maximum(rgb[by, bx], colors[big] * 0.45)
 
 
-def object_rules(count: int, zone: str, amount: float, size: float) -> list:
-    """小物件的擺放規則:每個小物件一條(放「都可以」時陸地、海上各一條),機率平分。"""
-    zones = {"water": [(40.0, 1e9)], "land": [(-1e9, -16.0)], "both": [(-1e9, -16.0), (40.0, 1e9)]}[zone]
-    chance = 0.012 * amount / max(1, count) / len(zones)
-    size_range = (max(8, int(size * 0.75)), max(10, int(size * 1.25)))
-    return [decor.DecorRule(f"user{i}", lo, hi, chance, size_range, spin=0.06)
-            for i in range(count) for lo, hi in zones]
-
-
 def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
            margin: float = 46.0, blend: float = 26.0, roughness: float = 22.0,
            seed: int = 7, scale: float = 1.0, decorations: float = 1.0,
@@ -178,9 +169,9 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
     extras = []
     if objects and objects_amount > 0:
         custom = {f"user{i}": sprite for i, sprite in enumerate(objects)}
-        extras = decor.place(s, list(rects) + decor.footprint(companions),
-                             object_rules(len(objects), objects_zone, objects_amount, objects_size),
-                             seed=seed + 5150, density=1.0, scale=scale)
+        extras = decor.place_objects(s, list(rects) + decor.footprint(companions), list(custom),
+                                     zone=objects_zone, amount=objects_amount, size=objects_size,
+                                     seed=seed + 5150, scale=scale)
     placements = []
     if decorations > 0 and rules:
         taken = list(rects) + decor.footprint(companions) + decor.footprint(extras)

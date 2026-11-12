@@ -618,6 +618,67 @@ def place_companions(field: np.ndarray, rects: Sequence[Rect], tags: Sequence[st
     return out
 
 
+OBJECT_ZONES = {"water": ((30.0, 1e9),), "land": ((-1e9, 2.0),), "both": ((-1e9, 2.0), (30.0, 1e9))}
+OBJECTS_PER_SCREEN = 5        # 數量 1 時,一個 1920×1080 的畫面大約放幾個小物件
+
+
+def place_objects(field: np.ndarray, rects: Sequence[Rect], kinds: Sequence[str], *, zone: str,
+                  amount: float, size: float, seed: int, scale: float = 1.0) -> List[Placement]:
+    """使用者的小物件:先決定要放幾個,再到地帶裡找放得下的空位。
+
+    跟一般裝飾物「每格一個機率」不同:陸地常常只剩圖示四周一條窄窄的空地,
+    用機率幾乎抽不到放得下的位置。這裡把所有候選位置打亂後一個一個試,
+    放不下時(只有陸地上)再試小一點的尺寸,直到放滿目標數量。
+    中心在地帶裡就可以(陸地上包含沙灘,物件可以稍微跨到水面)。
+    """
+    if not kinds or amount <= 0 or size <= 0:
+        return []
+    height, width = field.shape
+    target = int(round(amount * OBJECTS_PER_SCREEN * width * height / (1920 * 1080 * scale * scale)))
+    if target <= 0:
+        return []
+    rng = np.random.default_rng(seed)
+    step = max(6.0, size * scale * 0.4)
+    cols, rows = int(width // step) + 1, int(height // step) + 1
+    xs = ((np.arange(cols)[None, :] + 0.2 + 0.6 * rng.random((rows, cols))) * step).ravel()
+    ys = ((np.arange(rows)[:, None] + 0.2 + 0.6 * rng.random((rows, cols))) * step).ravel()
+    sizes = rng.random(xs.size)
+    angles = rng.random(xs.size)
+    order = rng.permutation(xs.size)
+    ranges = OBJECT_ZONES[zone]
+    shrink = (1.0, 0.8, 0.62) if zone != "water" else (1.0,)
+
+    if rects:
+        boxes = np.asarray(rects, dtype=np.float32)
+        left, top, right, bottom = boxes[:, 0] - 2, boxes[:, 1] - 2, boxes[:, 2] + 2, boxes[:, 3] + 2
+    placed: List[Tuple[float, float, float]] = []
+    out: List[Placement] = []
+    for index in order:
+        x, y = float(xs[index]), float(ys[index])
+        if x >= width or y >= height:
+            continue
+        s = float(field[int(y), int(x)])
+        if not any(lo <= s < hi for lo, hi in ranges):
+            continue
+        for factor in shrink:
+            side = int(round(size * scale * (0.8 + 0.4 * sizes[index]) * factor / 2)) * 2
+            half = side / 2
+            if side < 8 or not (half <= x < width - half and half <= y < height - half):
+                continue
+            if rects and bool(np.any((x + half > left) & (x - half < right) & (y + half > top) & (y - half < bottom))):
+                continue
+            if any((px - x) ** 2 + (py - y) ** 2 < (pr + half * 0.85) ** 2 for px, py, pr in placed):
+                continue
+            kind = kinds[len(out) % len(kinds)]
+            rule = DecorRule(kind, -1e9, 1e9, 1.0, (side, side), spin=0.06)
+            out.append(Placement(rule, int(x), int(y), side, (angles[index] - 0.5) * 360.0 * rule.spin, 0))
+            placed.append((x, y, half * 0.85))
+            break
+        if len(out) >= target:
+            break
+    return out
+
+
 def footprint(placements: Sequence[Placement]) -> List[Rect]:
     """裝飾物佔的方框;交給 place() 當成要避開的區域。"""
     return [(p.x - p.size // 2, p.y - p.size // 2, p.x + p.size // 2, p.y + p.size // 2) for p in placements]
