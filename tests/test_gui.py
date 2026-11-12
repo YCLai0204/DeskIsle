@@ -69,22 +69,49 @@ class GuiTests(unittest.TestCase):
             app, _ = self._make_app()
         self.assertIs(app.kit.p, style.DARK)
 
-    def test_appearance_can_be_switched_from_the_window(self):
+    def test_appearance_switch_only_changes_colours(self):
         from deskisle.ui import style
         with mock.patch.dict(os.environ, {"DESKISLE_APPEARANCE": ""}):
             app, root = self._make_app()
             app.show_page("運作")
-            app.var_seed.set(321)                          # 還沒套用的外觀,重建後要留著
+            root.update_idletasks()
+            app.scroll.canvas.yview_moveto(0.5)
+            top = app.scroll.canvas.canvasy(0)
+            app.var_seed.set(321)                          # 還沒套用的外觀要留著
+            widgets = list(_descendants(app.root))
             target = "light" if app.kit.p.dark else "dark"
+            new = style.DARK if target == "dark" else style.LIGHT
             app.var_appearance.set(target)
             app._appearance_changed()
-            root.update()
-            self.assertIs(app.kit.p, style.DARK if target == "dark" else style.LIGHT)
-            self.assertEqual(app.applied.appearance, target)
+            root.update_idletasks()
+            self.assertIs(app.kit.p, new)
+            self.assertEqual(list(_descendants(app.root)), widgets)        # 沒有重建任何元件
+            self.assertEqual(app.scroll.canvas.canvasy(0), top)             # 捲動位置不變
             self.assertEqual(app.current_page, "運作")
             self.assertEqual(app.var_seed.get(), 321)
-            self.assertEqual(app.applied.seed, Config().seed)
-            self.assertEqual(app.page_names(), ["外觀", "螢幕", "運作", "測試"])
+            self.assertEqual(app.applied.appearance, target)
+            self.assertEqual(str(app.root.cget("background")), new.bg)
+            self.assertEqual(str(app.page_title.cget("foreground")), new.text)
+            # 舊配色的顏色一個都不剩
+            old = style.LIGHT if new is style.DARK else style.DARK
+            old_colours = {getattr(old, f).lower() for f in old.__dataclass_fields__ if f != "dark"}
+            for widget in widgets:
+                for option in ("background", "foreground"):
+                    try:
+                        value = str(widget.cget(option)).lower()
+                    except Exception:
+                        continue
+                    self.assertNotIn(value, old_colours - {getattr(new, f).lower() for f in new.__dataclass_fields__
+                                                           if f != "dark"}, widget)
+
+    def test_palettes_map_one_to_one(self):
+        from deskisle.ui import style
+        from deskisle.ui.widgets import palette_map
+        for a, b in ((style.LIGHT, style.DARK), (style.DARK, style.LIGHT)):
+            mapping = palette_map(a, b)
+            for name in a.__dataclass_fields__:
+                if name != "dark":
+                    self.assertEqual(mapping[getattr(a, name).lower()], getattr(b, name), name)
 
     def test_segmented_control_chooses_by_click_and_keyboard(self):
         import tkinter as tk

@@ -49,11 +49,13 @@ class Palette:
     preview_bg: str     # 預覽圖還沒出來時的底色
 
 
-# 配色取自程式圖示:深海藍、淺灘、沙灘
+# 配色取自程式圖示:深海藍、淺灘、沙灘。
+# 切換配色時是把「舊配色的某個顏色」換成「新配色同一個項目的顏色」(見 widgets.apply_palette),
+# 所以同一組配色裡,不同項目只能在另一組配色裡也相同時才能用同一個色碼(on_accent 因此用 #fdfeff 而不是白色)。
 LIGHT = Palette(
     dark=False, bg="#f3f5f8", sidebar="#e9edf2", card="#ffffff", card_hover="#f6f8fa", field="#f3f5f8",
     border="#e1e6ec", border_strong="#c3ccd6", text="#17202a", muted="#5d6a79", subtle="#9aa5b1",
-    accent="#0f6fb5", accent_hover="#1b7cc2", accent_press="#0b5d98", on_accent="#ffffff",
+    accent="#0f6fb5", accent_hover="#1b7cc2", accent_press="#0b5d98", on_accent="#fdfeff",
     accent_soft="#e4f0fa", nav_hover="#e0e6ed", nav_selected="#d5e0eb", track="#d5dce4",
     ok="#1f9d68", warn="#a8650a", warn_soft="#fdf0d9", danger="#c4314b", preview_bg="#e8edf2",
 )

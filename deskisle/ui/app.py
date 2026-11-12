@@ -6,7 +6,7 @@
 - 中間是目前這一頁的設定(可以捲動)。
 - 右邊是即時預覽、「套用到桌布」與狀態訊息。
 
-配色在「運作」頁選:跟隨系統、淺色或深色(切換時整個視窗立刻重建);
+配色在「運作」頁選:跟隨系統、淺色或深色(切換時直接把現有元件換色,不重建);
 環境變數 DESKISLE_APPEARANCE=light 或 dark 可以強制指定(開發時截圖用)。
 關閉視窗時縮到系統匣,監看繼續在背景執行。
 
@@ -42,7 +42,7 @@ from ..watcher import (Watcher, WatchStatus, apply_layout, current_hour, effecti
 from . import style, tray
 from .preview import fit_width, render_preview, render_preview_image
 from .widgets import (Button, Card, Divider, Dropdown, Kit, NavItem, Pill, ScreenTile, ScrollArea, Segmented,
-                      Slider, ThemeTile, Toggle, label, to_photo)
+                      Slider, ThemeTile, Toggle, apply_palette, label, to_photo)
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
@@ -154,8 +154,8 @@ class App:
             self.set_status(self.startup_warning)
 
     # ================================================================== 版面
-    def _build_ui(self, first: bool = True) -> None:
-        """建立整個視窗。first=False 是切換配色後的重建:沿用目前的視窗大小。"""
+    def _build_ui(self) -> None:
+        """建立整個視窗。"""
         root = self.root
         self._scale = system.ui_scale()
         self.kit = kit = Kit(root, choose_palette(self.applied.appearance), self._scale)
@@ -216,12 +216,7 @@ class App:
                 pass
         self.show_page("外觀")
 
-        try:
-            system.style_title_bar(root.winfo_id(), p.dark, p.bg, p.text)
-        except Exception:
-            pass
-        if not first:
-            return
+        self._style_title_bar()
         root.update_idletasks()
         want_w = px(SIDEBAR_WIDTH + 32 + SETTINGS_WIDTH + 12 + 22 + PREVIEW_SIZE[0] + 44 + 24)
         want_h = px(740)
@@ -229,26 +224,6 @@ class App:
         height = min(want_h, int(root.winfo_screenheight() * 0.86))
         root.geometry(f"{width}x{height}")
         root.minsize(min(width, px(SIDEBAR_WIDTH + SETTINGS_WIDTH + 520)), min(height, px(560)))
-
-    def _rebuild_ui(self) -> None:
-        """換配色:記下畫面上的設定與目前的頁面,整個視窗重建後再放回去。"""
-        draft = self.draft_config()
-        page = self.current_page
-        for child in self.root.winfo_children():
-            child.destroy()
-        self._photo = None
-        self._preview_box = (0, 0)
-        self._preview_dirty = self._preview_busy   # 正在畫的那一張大小可能不對,畫完再畫一次
-        self.layout_override = None                 # 測試頁的狀態不保留
-        self.debug_preview = False
-        self._build_ui(first=False)
-        self._load_controls(draft)
-        if page in self.pages:
-            self.show_page(page)
-        self._update_pending()
-        if self.watcher.running:
-            self._show_watch_status(self.watcher.status)
-        self.schedule_preview(30)
 
     def _build_sidebar(self) -> None:
         kit = self.kit
@@ -847,13 +822,30 @@ class App:
         self._refresh_night_hint()
 
     def _appearance_changed(self) -> None:
-        """換配色:立刻存檔並重建視窗(只換顏色,外觀設定維持已套用的那一份)。"""
+        """換配色:立刻存檔,直接把現有的元件換色(不重建,捲動位置、預覽、輸入中的內容都不動)。"""
         appearance = self.var_appearance.get()
         if appearance == self.applied.appearance:
             return
         self.applied = replace(self.applied, appearance=appearance)
         self._save()
-        self.root.after_idle(self._rebuild_ui)   # 不要在元件自己的事件處理中把它刪掉
+        palette = choose_palette(appearance)
+        if palette is self.kit.p:
+            return
+        apply_palette(self.root, self.kit, palette)
+        self._style_title_bar()
+        # 少數用配色畫成圖片的地方,依新配色再畫一次
+        self._set_header_state(*self._header_state)
+        self._image_thumb_key = None
+        self._refresh_labels()
+        if self._photo is None:
+            self._draw_preview_placeholder("正在產生預覽…")
+
+    def _style_title_bar(self) -> None:
+        p = self.kit.p
+        try:
+            system.style_title_bar(self.root.winfo_id(), p.dark, p.bg, p.text)
+        except Exception:
+            pass
 
     def _follow_toggled(self) -> None:
         if self.var_follow.get():
@@ -1054,17 +1046,20 @@ class App:
         except Exception as exc:
             self._ui(self._preview_done, None, str(exc))
 
+    def _show_preview_image(self, data: bytes, info: str) -> None:
+        self._photo = tk.PhotoImage(master=self.root, data=base64.b64encode(data))
+        canvas = self.preview_canvas
+        canvas.configure(width=self._photo.width(), height=self._photo.height())
+        canvas.delete("all")
+        canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        self.preview_info.configure(text=info)
+
     def _preview_done(self, data: Optional[bytes], error: str, screens=None, info: str = "") -> None:
         self._preview_busy = False
         if screens is not None and screens != self._screens:
             self._set_screens(screens)   # 螢幕接上或拔掉了
         if data is not None:
-            self._photo = tk.PhotoImage(master=self.root, data=base64.b64encode(data))
-            canvas = self.preview_canvas
-            canvas.configure(width=self._photo.width(), height=self._photo.height())
-            canvas.delete("all")
-            canvas.create_image(0, 0, image=self._photo, anchor="nw")
-            self.preview_info.configure(text=info)
+            self._show_preview_image(data, info)
         else:
             self._photo = None
             self._draw_preview_placeholder(f"無法產生預覽:\n{error}")
@@ -1088,6 +1083,7 @@ class App:
 
     def _set_header_state(self, state: str, text: str = "") -> None:
         """左下角「自動跟隨」卡片裡的狀態(彩色圓點 + 文字)。"""
+        self._header_state = (state, text)
         p = self.kit.p
         color = {"following": p.ok, "paused": p.warn, "error": p.danger}.get(state, p.subtle)
         self._state_dot.configure(image=self.kit.circle(self.kit.px(8), color))

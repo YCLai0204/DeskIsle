@@ -59,7 +59,7 @@ def add_test_page(app) -> None:
     # ---- 預覽控制 ----------------------------------------------------------
     app.section(page, "預覽")
     body = app.card(page)
-    outline_var = tk.BooleanVar(value=False)
+    outline_var = tk.BooleanVar(value=app.debug_preview)   # 換配色重建時保留
 
     def toggle_outline() -> None:
         app.debug_preview = outline_var.get()

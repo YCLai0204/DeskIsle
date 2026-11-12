@@ -27,6 +27,51 @@ def bg_of(widget: tk.Misc) -> str:
     return str(widget.cget("background"))
 
 
+COLOR_OPTIONS = ("background", "foreground", "highlightbackground", "highlightcolor", "insertbackground",
+                 "selectbackground", "selectforeground", "activebackground", "activeforeground", "selectcolor",
+                 "disabledforeground")
+
+
+def palette_map(old: Palette, new: Palette) -> Dict[str, str]:
+    """舊配色的每個色碼 → 新配色同一個項目的色碼(小寫)。"""
+    mapping = {}
+    for name in old.__dataclass_fields__:
+        if name != "dark":
+            mapping[getattr(old, name).lower()] = getattr(new, name)
+    return mapping
+
+
+def apply_palette(root: tk.Misc, kit: "Kit", palette: Palette) -> None:
+    """不重建介面,直接把整個視窗換成另一組配色。
+
+    一般元件(Frame、Label、Entry、Menu……)把用到的舊色碼換成新色碼;
+    自己畫的元件(有 recolor 方法的)再依新配色重畫。
+    """
+    mapping = palette_map(kit.p, palette)
+    kit.p = palette
+
+    def visit(widget):
+        changes = {}
+        for option in COLOR_OPTIONS:
+            try:
+                value = str(widget.cget(option)).lower()
+            except (tk.TclError, ValueError):
+                continue
+            if value in mapping:
+                changes[option] = mapping[value]
+        if changes:
+            try:
+                widget.configure(**changes)
+            except tk.TclError:
+                pass
+        if hasattr(widget, "recolor"):
+            widget.recolor(mapping)
+        for child in widget.winfo_children():
+            visit(child)
+
+    visit(root)
+
+
 class Kit:
     """一個視窗共用的東西:配色、縮放比例、字型、圖片快取。"""
 
@@ -117,6 +162,12 @@ class _CanvasWidget(tk.Canvas):
         except tk.TclError:
             pass   # 視窗已經關閉
 
+    def recolor(self, mapping: Dict[str, str]) -> None:
+        """換配色後重畫(大部分元件畫的時候都直接讀 kit.p,重畫就好)。"""
+        paint = getattr(self, "_paint", None)
+        if paint is not None:
+            self._safe(paint)
+
 
 # ---------------------------------------------------------------------------
 class Card(_CanvasWidget):
@@ -132,6 +183,12 @@ class Card(_CanvasWidget):
         self.body = tk.Frame(self, background=self.fill)
         self.body.pack(fill="both", expand=True, padx=kit.px(padx), pady=kit.px(pady))
         self.bind("<Configure>", self._redraw)
+
+    def recolor(self, mapping: Dict[str, str]) -> None:
+        self.fill = mapping.get(self.fill.lower(), self.fill)
+        if self.outline:
+            self.outline = mapping.get(self.outline.lower(), self.outline)
+        self._redraw()
 
     def _redraw(self, _event=None) -> None:
         self.delete("box")
@@ -163,7 +220,7 @@ class Button(_CanvasWidget):
     def __init__(self, parent, kit: Kit, text: str, command: Optional[Callable] = None,
                  kind: str = "secondary", icon: Optional[str] = None, small: bool = False,
                  bg: Optional[str] = None):
-        p, px = kit.p, kit.px
+        px = kit.px
         font = kit.fonts["bold" if kind == "primary" else ("caption" if small else "body")]
         height = px(30 if small else 38)
         padx = px(12 if small else 18)
@@ -175,16 +232,8 @@ class Button(_CanvasWidget):
         self._pressed = False
         self.size = (width, height)
         self.radius = px(7)
-        self._colors = {
-            "primary": {"normal": (p.accent, None, p.on_accent), "hover": (p.accent_hover, None, p.on_accent),
-                        "pressed": (p.accent_press, None, p.on_accent), "disabled": (p.track, None, p.subtle)},
-            "secondary": {"normal": (p.card, p.border_strong, p.text), "hover": (p.card_hover, p.border_strong, p.text),
-                          "pressed": (p.bg, p.border, p.muted), "disabled": (p.card, p.border, p.subtle)},
-            "ghost": {"normal": (None, None, p.muted), "hover": (p.nav_hover, None, p.text),
-                      "pressed": (p.nav_selected, None, p.text), "disabled": (None, None, p.subtle)},
-            "danger": {"normal": (None, None, p.muted), "hover": (p.nav_hover, None, p.danger),
-                       "pressed": (p.nav_selected, None, p.danger), "disabled": (None, None, p.subtle)},
-        }[kind]
+        self.kind = kind
+        self._colors = self._color_table()
         self._back = self.create_image(0, 0, anchor="nw")
         x = padx
         self._icon_name, self._icon_size = icon, icon_size
@@ -196,6 +245,23 @@ class Button(_CanvasWidget):
                                   ("<ButtonPress-1>", self._press), ("<ButtonRelease-1>", self._release),
                                   ("<KeyPress-space>", self._key), ("<KeyPress-Return>", self._key)):
             self.bind(sequence, handler)
+        self._paint()
+
+    def _color_table(self):
+        p = self.kit.p
+        return {
+            "primary": {"normal": (p.accent, None, p.on_accent), "hover": (p.accent_hover, None, p.on_accent),
+                        "pressed": (p.accent_press, None, p.on_accent), "disabled": (p.track, None, p.subtle)},
+            "secondary": {"normal": (p.card, p.border_strong, p.text), "hover": (p.card_hover, p.border_strong, p.text),
+                          "pressed": (p.bg, p.border, p.muted), "disabled": (p.card, p.border, p.subtle)},
+            "ghost": {"normal": (None, None, p.muted), "hover": (p.nav_hover, None, p.text),
+                      "pressed": (p.nav_selected, None, p.text), "disabled": (None, None, p.subtle)},
+            "danger": {"normal": (None, None, p.muted), "hover": (p.nav_hover, None, p.danger),
+                       "pressed": (p.nav_selected, None, p.danger), "disabled": (None, None, p.subtle)},
+        }[self.kind]
+
+    def recolor(self, mapping) -> None:
+        self._colors = self._color_table()
         self._paint()
 
     def _state(self) -> str:
@@ -553,9 +619,15 @@ class Pill(_CanvasWidget):
         super().__init__(parent, kit, bg, width=1, height=kit.px(24))
         self.text = ""
 
+    def recolor(self, mapping) -> None:
+        if self.text:
+            text, color, fill, dot = self._shown
+            self.show(text, mapping.get(color.lower(), color), mapping.get(fill.lower(), fill), dot)
+
     def show(self, text: str, color: str, fill: str, dot: bool = True) -> None:
         kit = self.kit
         self.text = text
+        self._shown = (text, color, fill, dot)
         self.delete("all")
         if not text:
             self.configure(width=1)
@@ -775,8 +847,11 @@ class ScrollArea(tk.Frame):
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.bind_all(sequence, self._wheel)
 
-    def _on_inner(self, _event) -> None:
+    def _on_inner(self, _event=None) -> None:
         self.canvas.configure(scrollregion=(0, 0, self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()))
+        self._draw_bar()
+
+    def recolor(self, mapping) -> None:
         self._draw_bar()
 
     def _on_canvas(self, event) -> None:
