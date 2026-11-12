@@ -16,6 +16,7 @@
     trim_memory()                 把用不到的記憶體還給系統
     enable_dpi_awareness()        取得實體像素座標(只有 Windows 需要)
     prefers_dark()                系統是不是深色模式(介面配色跟著它)
+    desktop_folders()             桌面圖示來自哪些資料夾(判斷檔案類型用)
     style_title_bar(id, dark, …)  讓視窗標題列配合介面配色(只有 Windows 需要)
     acquire_single_instance / create_signal / wait_signal / send_signal   只允許一個執行個體
 """
@@ -32,7 +33,7 @@ if sys.platform == "win32":
     from .windows import screens as _screens
     from .windows.icons import read_layout  # noqa: F401
     from .windows.winapi import (  # noqa: F401
-        acquire_single_instance, create_signal, desktop_is_foreground, enable_dpi_awareness,
+        acquire_single_instance, create_signal, desktop_folders, desktop_is_foreground, enable_dpi_awareness,
         lower_thread_priority, monitor_count, prefers_dark, send_signal, style_title_bar, trim_memory,
         ui_scale, user_is_busy, virtual_screen, wait_signal,
     )
@@ -44,7 +45,7 @@ if sys.platform == "win32":
 elif sys.platform == "darwin":
     from .macos import autostart, wallpaper  # noqa: F401
     from .macos.desktop import (  # noqa: F401
-        acquire_single_instance, create_signal, desktop_is_foreground, enable_dpi_awareness,
+        acquire_single_instance, create_signal, desktop_folders, desktop_is_foreground, enable_dpi_awareness,
         list_screens, lower_thread_priority, monitor_count, prefers_dark, read_layout, send_signal,
         style_title_bar, trim_memory, ui_scale, user_is_busy, virtual_screen, wait_signal,
     )

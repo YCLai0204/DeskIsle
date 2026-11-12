@@ -17,10 +17,10 @@ from typing import Callable, Optional
 
 from PIL import Image
 
-from . import system
+from . import filetypes, system
 from .config import Config
 from .engine import decor, photo
-from .engine.layout import DesktopLayout, IconDetectionError, screen_rects
+from .engine.layout import DesktopLayout, IconDetectionError, screen_icons
 from .system import read_layout, wallpaper
 from .engine.render import render
 from .engine.themes import Theme, get_theme
@@ -36,6 +36,18 @@ def resolve_theme(config: Config) -> Theme:
     return theme
 
 
+def file_kinds(layout: DesktopLayout) -> list:
+    """每個圖示的檔案類型(與 layout.icons 一一對應);沒有名稱時全部是 other。"""
+    names = [icon.name for icon in layout.icons]
+    if not any(names):
+        return ["other"] * len(names)
+    try:
+        folders = system.desktop_folders()
+    except OSError:
+        folders = []
+    return filetypes.classify(names, folders)
+
+
 def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: float = 1.0,
                   debug: bool = False) -> Image.Image:
     """畫出第 index 個螢幕的桌布。ratio < 1 時畫縮小版(預覽用);
@@ -46,17 +58,22 @@ def render_screen(layout: DesktopLayout, config: Config, index: int, ratio: floa
     screen = layout.screen_list()[index]
     width = max(1, int(round(screen.width * ratio)))
     height = max(1, int(round(screen.height * ratio)))
+    icons = screen_icons(layout, screen, ratio)
+    tags = ()
+    if config.file_decor and config.decorations > 0:
+        kinds = file_kinds(layout)
+        tags = [kinds[i] for _rect, i in icons]
     layer = None
     if config.image_mode in ("land", "water"):
         picture = photo.load(config.image)
         if picture is not None:          # 圖片不見了就照一般主題畫
             layer = photo.cover(picture, width, height)   # 每個螢幕各自裁切
     return render(
-        width, height, screen_rects(layout, screen, ratio), resolve_theme(config),
+        width, height, [rect for rect, _i in icons], resolve_theme(config),
         margin=config.margin, blend=config.blend, roughness=config.roughness,
         seed=config.seed + 1013 * index, scale=system.ui_scale() * ratio,
         decorations=config.decorations, debug=debug,
-        photo=layer, photo_mode=config.image_mode if layer is not None else "",
+        photo=layer, photo_mode=config.image_mode if layer is not None else "", tags=tags,
     )
 
 
@@ -98,7 +115,7 @@ def new_seed(old: int) -> int:
 def look_key(config: Config) -> tuple:
     """設定中會影響畫面的部分;這些一變就要重畫。"""
     return (config.theme, config.seed, config.margin, config.blend, config.roughness,
-            config.decorations, config.screens, config.image, config.image_mode)
+            config.decorations, config.screens, config.image, config.image_mode, config.file_decor)
 
 
 class LayoutDebouncer:
@@ -250,6 +267,12 @@ class Watcher:
                 config = replace(config, seed=new_seed(config.seed))
                 signature = (layout_key, look_key(config))
             started = time.perf_counter()
+            if config.file_decor and layout.icons and not any(icon.name for icon in layout.icons):
+                # 平常輪詢不讀名稱(省一半的跨行程呼叫),要畫之前才讀,用來判斷檔案類型
+                try:
+                    layout = read_layout(names=True)
+                except IconDetectionError:
+                    pass
             try:
                 apply_layout(layout, config)
             except Exception as exc:  # 磁碟滿、登錄檔被鎖等;下一輪再試

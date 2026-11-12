@@ -34,7 +34,8 @@ from .. import APP_NAME, __version__, is_frozen, system
 from ..config import Config, app_dir, load_config, save_config
 from ..engine import photo
 from ..engine.layout import DesktopLayout, Screen
-from ..engine.themes import THEMES, get_theme
+from ..engine.themes import DECOR_LABELS, THEMES, get_theme
+from ..filetypes import KIND_LABELS
 from ..system import autostart, read_layout, wallpaper
 from ..watcher import Watcher, WatchStatus, apply_layout, look_key
 from . import style, tray
@@ -44,7 +45,7 @@ from .widgets import (Button, Card, Divider, Kit, NavItem, Pill, ScreenTile, Scr
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
-LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations", "image_mode")
+LOOK_FIELDS = ("theme", "seed", "margin", "blend", "roughness", "decorations", "image_mode", "file_decor")
 IMAGE_MODE_OPTIONS = (("off", "不使用"), ("land", "當陸地"), ("water", "當海"), ("colors", "取色"))
 IMAGE_MODE_HINTS = {
     "off": "選好圖片後,可以把它當成島嶼的陸地、當成海,或只拿它的顏色。",
@@ -173,6 +174,7 @@ class App:
         self.var_poll, self.var_idle, self.var_debounce = tk.DoubleVar(), tk.DoubleVar(), tk.DoubleVar()
         self.var_appearance = tk.StringVar(value=self.applied.appearance)
         self.var_image, self.var_image_mode = tk.StringVar(), tk.StringVar(value="off")
+        self.var_file_decor = tk.BooleanVar(value=True)
 
         self._build_sidebar()
 
@@ -465,6 +467,10 @@ class App:
         body = self.card(page)
         self.slider_row(body, "數量", "0 = 不放裝飾物,1 = 標準,2 = 兩倍", self.var_decor, 0, 2, "{:.1f}",
                         self._look_changed)
+        toggle = self.toggle_row(body, "依檔案類型", "在每個圖示旁邊放一個代表它檔案類型的裝飾物",
+                                 self.var_file_decor, self._look_changed)
+        self.file_decor_hint = label(toggle.master.master, kit, font="caption", color=p.muted, wrap=TEXT_WRAP - 30)
+        self.file_decor_hint.grid(row=2, column=0, columnspan=2, sticky="w", pady=(px(8), 0))
 
         Button(page, kit, "恢復預設外觀", self._reset_look, icon="restore", small=True).pack(
             anchor="w", pady=(px(18), px(6)))
@@ -702,6 +708,7 @@ class App:
         self.var_appearance.set(config.appearance)
         self.var_image.set(config.image)
         self.var_image_mode.set(config.image_mode)
+        self.var_file_decor.set(config.file_decor)
         self._set_header_state("following" if config.follow else "stopped",
                                "" if config.follow else "未開啟")
         try:
@@ -714,6 +721,9 @@ class App:
         self.theme_hint.configure(text=get_theme(self._theme_key()).description)
         self._refresh_theme_tiles()
         self._refresh_image_card()
+        pairs = [f"{KIND_LABELS[kind]} → {DECOR_LABELS.get(rule.kind, rule.kind)}"
+                 for kind, rule in get_theme(self._theme_key()).companions]
+        self.file_decor_hint.configure(text="、".join(pairs))
 
     def _theme_key(self) -> str:
         return self._theme_names.get(self.var_theme.get(), self.applied.theme)
@@ -743,6 +753,7 @@ class App:
             appearance=self.var_appearance.get(),
             image=self.var_image.get(),
             image_mode=self.var_image_mode.get(),
+            file_decor=bool(self.var_file_decor.get()),
         ).validate()
 
     def _save(self) -> None:
@@ -846,7 +857,7 @@ class App:
             system.lower_thread_priority()
             try:
                 started = time.perf_counter()
-                layout = read_layout(names=False)
+                layout = read_layout(names=config.file_decor)
                 apply_layout(layout, config)
                 message = (f"已套用桌布:{len(layout.icons)} 個圖示,"
                            f"{time.perf_counter() - started:.2f} 秒")
@@ -942,7 +953,7 @@ class App:
 
     def _preview_worker(self, config, override, debug, box, radius) -> None:
         try:
-            layout = override or read_layout(names=False)
+            layout = override or read_layout(names=config.file_decor)
             image = render_preview_image(layout, config, fit_width(layout, *box), debug)
             buffer = io.BytesIO()
             style.rounded(image, radius).save(buffer, "PNG", compress_level=1)

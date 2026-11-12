@@ -143,7 +143,7 @@ def add_test_page(app) -> None:
     def export() -> None:
         def work():
             config = app.draft_config()
-            layout = app.layout_override or read_layout(names=False)
+            layout = app.layout_override or read_layout(names=True)
             image = render_layout(layout, config, debug=app.debug_preview)
             folder = PROJECT_ROOT / "previews"
             folder.mkdir(exist_ok=True)

@@ -34,6 +34,7 @@ class Config:
     appearance: str = "system"     # 介面配色:system(跟隨系統)/ light / dark
     image: str = ""                # 使用者的圖片(匯入到 app_dir()/images 的那一份)
     image_mode: str = "off"        # 圖片的用法:off / land(當陸地)/ water(當海)/ colors(取色)
+    file_decor: bool = True        # 依檔案類型在圖示旁邊放裝飾物(資料夾 → 椰子樹……)
 
     def validate(self) -> "Config":
         get_theme(self.theme)

@@ -51,7 +51,8 @@ def _add_sparkles(rgb: np.ndarray, s: np.ndarray, theme: Theme, seed: int, scale
 def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
            margin: float = 46.0, blend: float = 26.0, roughness: float = 22.0,
            seed: int = 7, scale: float = 1.0, decorations: float = 1.0,
-           debug: bool = False, photo: Optional[np.ndarray] = None, photo_mode: str = "") -> Image.Image:
+           debug: bool = False, photo: Optional[np.ndarray] = None, photo_mode: str = "",
+           tags: Sequence[str] = ()) -> Image.Image:
     """畫出一張 width×height 的 RGB 圖片。
 
     rects 是圖示矩形(圖片座標);scale 是縮放比例,像素類參數都會乘上它
@@ -59,6 +60,8 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
     decorations 是裝飾物密度(0 = 不畫)。debug=True 會畫出圖示外框。
     photo 是使用者的圖片(已經裁成 height×width×3,見 photo.cover);
     photo_mode = "land" 時鋪在陸地上,"water" 時鋪在海上。
+    tags 與 rects 一一對應,是每個圖示的檔案類型(見 filetypes.py);有的話會在圖示旁邊
+    放代表該類型的裝飾物(主題的 companions)。
     """
     sd = shore_field(
         width, height, rects,
@@ -154,9 +157,14 @@ def render(width: int, height: int, rects: Sequence[Rect], theme: Theme, *,
     image = Image.fromarray(rgb.astype(np.uint8), "RGB")
     del rgb
 
-    if decorations > 0 and rules:
-        placements = decor.place(s, rects, rules, seed=seed, density=decorations, scale=scale)
-        decor.draw(image, placements, scale)
+    if decorations > 0:
+        companions = []
+        if tags and theme.companions:
+            companions = decor.place_companions(s, rects, tags, dict(theme.companions), seed=seed, scale=scale)
+        # 一般裝飾物要避開圖示,也要避開剛放好的檔案類型裝飾物
+        placements = decor.place(s, list(rects) + decor.footprint(companions), rules, seed=seed,
+                                 density=decorations, scale=scale) if rules else []
+        decor.draw(image, placements + companions, scale)
 
     if debug:
         draw = ImageDraw.Draw(image)

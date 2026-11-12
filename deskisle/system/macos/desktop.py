@@ -260,6 +260,11 @@ def ui_scale() -> float:
     return 1.0
 
 
+def desktop_folders() -> List[Path]:
+    """桌面上的圖示來自哪些資料夾。"""
+    return [desktop_folder()]
+
+
 def prefers_dark() -> bool:
     """系統外觀是不是深色。"""
     try:

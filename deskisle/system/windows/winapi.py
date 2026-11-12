@@ -57,6 +57,11 @@ user32.GetClassNameW.restype = ctypes.c_int
 shell32.SHQueryUserNotificationState.argtypes = [ctypes.POINTER(ctypes.c_int)]
 shell32.SHQueryUserNotificationState.restype = ctypes.c_long
 
+shell32.SHGetFolderPathW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR]
+shell32.SHGetFolderPathW.restype = ctypes.c_long
+CSIDL_DESKTOPDIRECTORY = 0x10          # 目前使用者的桌面(可能被 OneDrive 轉到別處)
+CSIDL_COMMON_DESKTOPDIRECTORY = 0x19   # 所有使用者共用的桌面
+
 # ---- kernel32 -------------------------------------------------------------
 kernel32.GetCurrentProcess.argtypes = []
 kernel32.GetCurrentProcess.restype = wintypes.HANDLE
@@ -168,6 +173,17 @@ def ui_scale() -> float:
     except AttributeError:
         dpi = 96
     return max(dpi, 96) / 96.0
+
+
+def desktop_folders() -> list:
+    """桌面上的圖示來自哪些資料夾(目前使用者的桌面 + 共用桌面)。"""
+    from pathlib import Path
+    folders = []
+    for csidl in (CSIDL_DESKTOPDIRECTORY, CSIDL_COMMON_DESKTOPDIRECTORY):
+        buffer = ctypes.create_unicode_buffer(260)
+        if shell32.SHGetFolderPathW(None, csidl, None, 0, buffer) == 0 and buffer.value:
+            folders.append(Path(buffer.value))
+    return folders
 
 
 def prefers_dark() -> bool:

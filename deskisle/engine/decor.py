@@ -562,6 +562,67 @@ def place(field: np.ndarray, rects: Sequence[Rect], rules: Sequence[DecorRule], 
     return out
 
 
+def place_companions(field: np.ndarray, rects: Sequence[Rect], tags: Sequence[str],
+                     table: Dict[str, DecorRule], *, seed: int, scale: float = 1.0) -> List[Placement]:
+    """每個圖示旁邊放一個代表它檔案類型的裝飾物(例如資料夾旁邊一棵椰子樹)。
+
+    tags 與 rects 一一對應(檔案類型);table 是 檔案類型 → 規則。
+    從圖示外緣開始一圈一圈往外找,取第一個落在規則地帶(lo~hi)、
+    不蓋到任何圖示、也不跟其他裝飾物重疊的位置;找不到就不放。
+    起始方向只由種子與這個圖示的位置決定,所以移動別的圖示不會讓它換位置。
+    """
+    if not rects or not table:
+        return []
+    height, width = field.shape
+    boxes = np.asarray(rects, dtype=np.float32)
+    left, top, right, bottom = boxes[:, 0] - 2, boxes[:, 1] - 2, boxes[:, 2] + 2, boxes[:, 3] + 2
+    placed: List[Tuple[float, float, float]] = []
+    out: List[Placement] = []
+    for rect, tag in zip(rects, tags):
+        rule = table.get(tag)
+        if rule is None:
+            continue
+        rng = random.Random(f"{seed}:{rect[0]}:{rect[1]}")
+        lo, hi = rule.size
+        size = int(round((lo + (hi - lo) * rng.random()) * scale / 2)) * 2
+        if size < 6:
+            continue
+        half = size / 2
+        cx, cy = (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2
+        rx, ry = (rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2
+        start = rng.random() * math.tau
+        found = None
+        for ring in range(12):
+            gap = (3 + ring * 8) * scale + half
+            for step in range(16):
+                angle = start + step * math.tau / 16
+                x, y = cx + math.cos(angle) * (rx + gap), cy + math.sin(angle) * (ry + gap)
+                if not (half <= x < width - half and half <= y < height - half):
+                    continue
+                if not rule.lo <= float(field[int(y), int(x)]) < rule.hi:
+                    continue
+                if bool(np.any((x + half > left) & (x - half < right) & (y + half > top) & (y - half < bottom))):
+                    continue
+                if any((px - x) ** 2 + (py - y) ** 2 < (pr + half * 0.8) ** 2 for px, py, pr in placed):
+                    continue
+                found = (x, y)
+                break
+            if found:
+                break
+        if found is None:
+            continue
+        x, y = found
+        placed.append((x, y, half * 0.8))
+        out.append(Placement(rule, int(x), int(y), size, (rng.random() - 0.5) * 360.0 * rule.spin,
+                             rng.randrange(VARIANTS)))
+    return out
+
+
+def footprint(placements: Sequence[Placement]) -> List[Rect]:
+    """裝飾物佔的方框;交給 place() 當成要避開的區域。"""
+    return [(p.x - p.size // 2, p.y - p.size // 2, p.x + p.size // 2, p.y + p.size // 2) for p in placements]
+
+
 def draw(image: Image.Image, placements: Sequence[Placement], scale: float = 1.0) -> None:
     """把裝飾物畫到圖上(直接修改 image)。"""
     for p in sorted(placements, key=lambda q: (q.y, q.x)):

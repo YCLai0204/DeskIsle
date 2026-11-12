@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Tuple
 
 from .decor import DecorRule as D
@@ -38,6 +38,7 @@ class Theme:
     sparkles: float = 0.0       # 水域的光點密度(每一萬像素幾顆)
     sparkle_colors: Tuple[Color, ...] = ((255, 255, 255),)
     decor: Tuple[D, ...] = ()   # 裝飾物規則,越前面越優先
+    companions: Tuple[Tuple[str, D], ...] = ()   # 依檔案類型放在圖示旁邊的裝飾物(見 COMPANIONS)
 
 
 _WET_ROCK = ((96, 100, 104), (134, 138, 140), (62, 66, 72))
@@ -304,8 +305,55 @@ NIGHT = Theme(
     ),
 )
 
+# ---------------------------------------------------------------------------
+# 依檔案類型放在圖示旁邊的裝飾物:檔案類型 → (裝飾物, 地帶下限, 地帶上限, 大小範圍)
+# 地帶是離海岸線的距離(負 = 陸地);會在圖示四周找第一個落在這個地帶的空位。
+# ---------------------------------------------------------------------------
+COMPANIONS = {
+    "beach": {"folder": ("palm", -46, -8, (38, 48)), "image": ("shell", -36, -2, (15, 19)),
+              "document": ("starfish", -36, -2, (15, 19)), "shortcut": ("boat", 14, 110, (34, 42)),
+              "app": ("coral", 10, 100, (26, 32)), "media": ("fish", 20, 150, (28, 34))},
+    "meadow": {"folder": ("tree", -46, -8, (34, 44)), "image": ("flowers", -40, -2, (20, 26)),
+               "document": ("rock", -36, -2, (15, 20)), "shortcut": ("boat", 14, 110, (32, 40)),
+               "app": ("lilypad", 8, 100, (20, 26)), "media": ("fish", 20, 150, (26, 32))},
+    "volcano": {"folder": ("crack", -46, -8, (30, 40)), "image": ("rock", -40, -2, (18, 24)),
+                "document": ("rock", -40, -2, (13, 17)), "shortcut": ("rock", 22, 150, (20, 28)),
+                "app": ("crack", -46, -8, (24, 30)), "media": ("rock", 22, 150, (14, 20))},
+    "cosmos": {"folder": ("crater", -46, -6, (26, 34)), "image": ("planet", 30, 160, (28, 36)),
+               "document": ("rock", -40, -2, (13, 18)), "shortcut": ("glint", 24, 160, (18, 24)),
+               "app": ("galaxy", 40, 180, (40, 52)), "media": ("planet", 30, 160, (22, 28))},
+    "arctic": {"folder": ("pine", -46, -8, (32, 42)), "image": ("floe", 12, 100, (22, 30)),
+               "document": ("rock", -36, -2, (15, 20)), "shortcut": ("floe", 12, 100, (28, 36)),
+               "app": ("pine", -46, -8, (26, 32)), "media": ("fish", 20, 150, (26, 32))},
+    "desert": {"folder": ("palm", -46, -8, (38, 48)), "image": ("flowers", -40, -2, (18, 24)),
+               "document": ("rock", -36, -2, (15, 20)), "shortcut": ("cactus", 12, 150, (22, 30)),
+               "app": ("cactus", 12, 150, (18, 24)), "media": ("tree", 16, 150, (18, 24))},
+    "night": {"folder": ("palm", -46, -8, (38, 48)), "image": ("starfish", -36, -2, (15, 19)),
+              "document": ("rock", -36, -2, (15, 20)), "shortcut": ("boat", 14, 110, (34, 42)),
+              "app": ("orb", 24, 150, (22, 30)), "media": ("orb", 24, 150, (18, 24))},
+}
+
+# 介面上顯示用的裝飾物名稱
+DECOR_LABELS = {
+    "palm": "椰子樹", "rock": "岩石", "starfish": "海星", "shell": "貝殼", "coral": "珊瑚", "fish": "魚",
+    "boat": "小船", "tree": "樹", "flowers": "花叢", "lilypad": "荷葉", "crater": "隕石坑", "planet": "行星",
+    "galaxy": "星系", "glint": "星光", "cactus": "仙人掌", "floe": "浮冰", "pine": "雪松", "crack": "發光裂縫",
+    "orb": "水母",
+}
+
+
+def _with_companions(theme: Theme) -> Theme:
+    """依 COMPANIONS 建立規則;配色、影子、旋轉沿用主題裡同一種裝飾物的設定,看起來才一致。"""
+    rules = []
+    for file_kind, (kind, lo, hi, size) in COMPANIONS.get(theme.key, {}).items():
+        like = next((r for r in theme.decor if r.kind == kind), None)
+        extra = dict(colors=like.colors, shadow=like.shadow, spin=like.spin, alpha=like.alpha) if like else {}
+        rules.append((file_kind, D(kind, lo, hi, 1.0, size, **extra)))
+    return replace(theme, companions=tuple(rules))
+
+
 THEMES: Dict[str, Theme] = {
-    t.key: t for t in (BEACH, MEADOW, VOLCANO, COSMOS, ARCTIC, DESERT, NIGHT)
+    t.key: _with_companions(t) for t in (BEACH, MEADOW, VOLCANO, COSMOS, ARCTIC, DESERT, NIGHT)
 }
 DEFAULT_THEME = BEACH.key
 

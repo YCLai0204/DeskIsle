@@ -92,13 +92,18 @@ class DesktopLayout:
 
 def screen_rects(layout: DesktopLayout, screen: Screen, ratio: float = 1.0) -> List[Rect]:
     """落在這個螢幕裡的圖示矩形,換成以螢幕左上角為原點、再乘上 ratio 的座標。"""
+    return [rect for rect, _index in screen_icons(layout, screen, ratio)]
+
+
+def screen_icons(layout: DesktopLayout, screen: Screen, ratio: float = 1.0) -> List[Tuple[Rect, int]]:
+    """同 screen_rects,但每個矩形附上它在 layout.icons 裡的位置(用來對應檔案類型)。"""
     rects = []
-    for left, top, right, bottom in layout.rects:
+    for index, (left, top, right, bottom) in enumerate(layout.rects):
         left, top = max(left, screen.left) - screen.left, max(top, screen.top) - screen.top
         right, bottom = min(right, screen.right) - screen.left, min(bottom, screen.bottom) - screen.top
         if right - left < 2 or bottom - top < 2:
             continue
         l, t = int(left * ratio), int(top * ratio)
-        rects.append((l, t, max(int(right * ratio), l + 1), max(int(bottom * ratio), t + 1)))
+        rects.append(((l, t, max(int(right * ratio), l + 1), max(int(bottom * ratio), t + 1)), index))
     return rects
 
