@@ -8,9 +8,13 @@
 - 在 macOS 上執行 → dist/DeskIsle.app。PyInstaller 不能跨平台打包,
   Mac 版必須在 Mac 上執行這個腳本。
 
+dist 裡已經有 DeskIsle.exe(例如舊版正在執行、檔案被鎖住)時不會覆蓋,
+而是另存為 DeskIsle_2.exe、DeskIsle_3.exe…(Mac 為 DeskIsle_2.app…)。
+
 打包時會排除「測試」頁(deskisle.gui_dev)。
 """
 import plistlib
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
+STAGING = BUILD / "staging"    # 先打包到這裡,完成後再搬到 dist(不會因為 dist 裡的檔案被鎖住而失敗)
 
 # 用不到、但環境裡如果裝了可能被順便帶進去的大型套件
 EXCLUDES = [
@@ -55,7 +60,7 @@ def main() -> int:
         "--windowed",
         "--name", "DeskIsle",
         "--icon", str(icon_path),
-        "--distpath", str(DIST),
+        "--distpath", str(STAGING),
         "--workpath", str(BUILD / "work"),
         "--specpath", str(BUILD),
     ]
@@ -74,14 +79,34 @@ def main() -> int:
         print("打包失敗")
         return done.returncode
 
+    built = STAGING / ("DeskIsle.app" if mac else "DeskIsle.exe")
     if mac:
-        return _finish_mac_app(DIST / "DeskIsle.app")
-    exe = DIST / "DeskIsle.exe"
-    print(f"完成:{exe}({exe.stat().st_size / 1_048_576:.1f} MB)")
+        _finish_mac_app(built)
+
+    # dist 裡已經有同名的(例如舊版正在執行而被鎖住)就不覆蓋,改用下一個流水號
+    DIST.mkdir(exist_ok=True)
+    target = unique_path(DIST, "DeskIsle", built.suffix)
+    shutil.move(str(built), str(target))
+    if mac:
+        print(f"完成:{target}")
+    else:
+        print(f"完成:{target}({target.stat().st_size / 1_048_576:.1f} MB)")
+    if target.stem != "DeskIsle":
+        print(f"dist 裡已經有 DeskIsle{built.suffix},這次的結果另存為 {target.name}")
     return 0
 
 
-def _finish_mac_app(app: Path) -> int:
+def unique_path(folder: Path, stem: str, suffix: str) -> Path:
+    """folder/stem+suffix;已經存在就依序試 stem_2、stem_3…"""
+    candidate = folder / f"{stem}{suffix}"
+    number = 2
+    while candidate.exists():
+        candidate = folder / f"{stem}_{number}{suffix}"
+        number += 1
+    return candidate
+
+
+def _finish_mac_app(app: Path) -> None:
     """在 Info.plist 加上「控制 Finder」的用途說明,再重新簽章(ad-hoc)。
 
     沒有這段說明,macOS 會直接拒絕 DeskIsle 詢問 Finder 圖示位置。
@@ -96,8 +121,6 @@ def _finish_mac_app(app: Path) -> int:
     signed = subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)])
     if signed.returncode != 0:
         print("注意:重新簽章失敗,第一次開啟時可能需要在「系統設定 → 隱私權與安全性」按「強制打開」")
-    print(f"完成:{app}")
-    return 0
 
 
 if __name__ == "__main__":

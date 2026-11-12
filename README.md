@@ -124,6 +124,12 @@ python -m unittest discover -s tests
 ```
 pip install pyinstaller
 python build.py                    →  dist\DeskIsle.exe
+```
+
+`dist` 裡已經有 `DeskIsle.exe`(例如舊版正在執行、檔案被鎖住)時不會覆蓋,
+而是另存為 `DeskIsle_2.exe`、`DeskIsle_3.exe`…
+
+```
 dist\DeskIsle.exe --selftest 結果.json     不開視窗、不動桌布的自我檢查
 ```
 
