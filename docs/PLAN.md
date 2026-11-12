@@ -5,7 +5,7 @@
 DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「跟著檔案長出來」的桌布:
 有檔案的地方是沙灘,沒有檔案的地方是海洋。把檔案拖到別處,陸地就跟著移動。
 
-目前版本:0.0.7(2026-11-12)
+目前版本:0.0.8(2026-11-12)
 
 ---
 
@@ -76,6 +76,7 @@ DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「�
 - [x] 0.0.5:系統相關呼叫集中到 system.py
 - [x] 0.0.6:支援 macOS(實驗性,尚未在實機測試)
 - [x] 0.0.7:打包時 dist 裡已有同名檔案就加流水號另存,不再因舊版執行中而失敗
+- [x] 0.0.8:整理專案結構(engine / system / ui 三個子套件;測試依主題拆檔;文件移到 docs/)
 
 ### 之後(未製作)
 
@@ -109,34 +110,47 @@ DeskIsle 會讀取 Windows 桌面上每個圖示的位置,即時畫出一張「�
 ## 5. 架構
 
 ```
-deskisle_app.py   視窗程式進入點(打包成 exe 的也是它)
-build.py          打包腳本 → dist/DeskIsle.exe
+deskisle_app.py     視窗程式進入點(打包成 exe 的也是它)
+build.py            打包腳本 → dist/DeskIsle.exe(Mac:dist/DeskIsle.app)
 deskisle/
-  __main__.py     python -m deskisle
-  cli.py          命令列介面(開發與腳本用;exe 不包含)
-  gui.py          設定介面:外觀頁、螢幕頁、運作頁、即時預覽、自我檢查
-  ui_style.py     介面配色、字型、ttk 樣式、標題列與主題縮圖、勾選框圖片
-  gui_dev.py      測試頁(只有原始碼版本有;打包時排除)
-  tray.py         系統匣圖示、程式圖示
-  system.py       依作業系統選擇實作;其他模組只透過它呼叫系統功能
-  macos.py        macOS:螢幕清單、Finder 圖示位置、單一執行個體(osascript)
-  wallpaper_mac.py  macOS:套用、備份、還原桌布(NSWorkspace,透過 JXA)
-  autostart_mac.py  macOS:登入時啟動(LaunchAgent)
-  autostart.py    開機自動啟動(目前使用者的啟動登錄機碼)
-  config.py       設定:預設值、讀寫 JSON
-  winapi.py       Win32 宣告、DPI、省資源相關、單一執行個體
-  layout.py       DesktopLayout / Screen / DesktopIcon 資料結構(不碰作業系統)
-  icons.py        桌面圖示偵測 → DesktopLayout
-  screens.py      螢幕清單(EnumDisplayMonitors)與每個螢幕各自的桌布(IDesktopWallpaper)
-  terrain.py      距離場、平滑融合、雜訊(純 numpy,不碰 Windows)
-  themes.py       主題定義(色帶、質感參數、裝飾物規則)
-  decor.py        裝飾物的繪製與擺放(不碰 Windows)
-  render.py       地形 → RGB 圖片(不碰 Windows)
-  wallpaper.py    套用、備份、還原桌布
-  watcher.py      監看器:分級輪詢 + 防抖動 + 重畫
+  __init__.py       版本號、程式名稱
+  __main__.py       python -m deskisle
+  cli.py            命令列介面(開發與腳本用;exe 不包含)
+  config.py         設定:預設值、讀寫 JSON
+  watcher.py        監看器:分級輪詢 + 防抖動 + 重畫;把排列畫成每個螢幕的桌布
+  engine/           畫桌布的核心,與作業系統無關、也不碰介面
+    layout.py         DesktopLayout / Screen / DesktopIcon 資料結構
+    terrain.py        距離場、平滑融合、雜訊(純 numpy)
+    themes.py         主題定義(色帶、質感參數、裝飾物規則)
+    decor.py          裝飾物的繪製與擺放
+    render.py         地形 → RGB 圖片
+  system/           作業系統相關的功能
+    __init__.py       依作業系統選擇實作;其他模組只透過它呼叫系統功能
+    windows/
+      winapi.py         Win32 宣告、DPI、省資源相關、單一執行個體
+      icons.py          桌面圖示偵測 → DesktopLayout
+      screens.py        螢幕清單(EnumDisplayMonitors)與每個螢幕各自的桌布(IDesktopWallpaper)
+      wallpaper.py      套用、備份、還原桌布
+      autostart.py      開機自動啟動(目前使用者的啟動登錄機碼)
+    macos/
+      desktop.py        螢幕清單、Finder 圖示位置、單一執行個體(osascript)
+      wallpaper.py      套用、備份、還原桌布(NSWorkspace,透過 JXA)
+      autostart.py      登入時啟動(LaunchAgent)
+  ui/               設定視窗
+    app.py            視窗本體:外觀頁、螢幕頁、運作頁、即時預覽、自我檢查
+    style.py          介面配色、字型、樣式、主題縮圖
+    dev.py            測試頁(只有原始碼版本有;打包時排除)
+    tray.py           系統匣圖示、程式圖示
 tests/
-  test_render.py  地形、繪圖、裝飾物(任何作業系統都能跑)
-  test_app.py     設定、監看、備份還原、開機啟動、介面
+  test_render.py    地形、繪圖、裝飾物(任何作業系統都能跑)
+  test_config.py    設定檔
+  test_watcher.py   防抖動、監看迴圈、移動後換種子
+  test_screens.py   多螢幕:選擇螢幕、各自繪製與套用
+  test_windows.py   Windows:開機啟動、桌布備份還原
+  test_macos.py     macOS(用假的 osascript,任何作業系統都能跑)
+  test_gui.py       設定介面
+docs/
+  PLAN.md           這份文件
 ```
 
 資料流:
@@ -156,7 +170,7 @@ tests/
                               桌布
 ```
 
-`terrain.py`、`decor.py`、`render.py` 只吃「尺寸 + 矩形清單」,完全不知道 Windows 的存在,
+`engine/` 裡的 `terrain.py`、`decor.py`、`render.py` 只吃「尺寸 + 矩形清單」,完全不知道作業系統的存在,
 所以可以獨立測試;介面的即時預覽也是同一套程式,只是畫縮小版。
 
 ---
@@ -314,8 +328,8 @@ Progman(或某個 WorkerW)
 
 打包後看不到測試頁,有兩層保險:
 
-1. `gui.py` 偵測到自己是打包後的執行檔(`sys.frozen`)時不載入測試頁;
-2. `build.py` 打包時直接把 `deskisle.gui_dev` 模組排除,exe 裡根本沒有這段程式。
+1. `ui/app.py` 偵測到自己是打包後的執行檔(`sys.frozen`)時不載入測試頁;
+2. `build.py` 打包時直接把 `deskisle.ui.dev` 模組排除,exe 裡根本沒有這段程式。
 
 其他行為:
 

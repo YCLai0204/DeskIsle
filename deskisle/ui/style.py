@@ -13,8 +13,8 @@ from typing import Dict, Tuple
 
 from PIL import Image, ImageDraw
 
-from .render import render
-from .themes import Theme
+from ..engine.render import render
+from ..engine.themes import Theme
 
 # ---- 配色(取自程式圖示:深海藍 → 淺灘 → 沙灘) ------------------------------
 BG = "#eef3f7"            # 視窗底色

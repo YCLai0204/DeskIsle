@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from . import APP_NAME
-from .themes import DEFAULT_THEME, get_theme
+from .engine.themes import DEFAULT_THEME, get_theme
 
 
 @dataclass(frozen=True)

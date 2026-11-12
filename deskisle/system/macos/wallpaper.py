@@ -16,9 +16,9 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image
 
-from .config import app_dir
-from .layout import Screen
-from .macos import run_osascript
+from ...config import app_dir
+from ...engine.layout import Screen
+from .desktop import run_osascript
 
 BACKGROUND_KINDS = {0: "圖片"}
 _OUTPUT_NAMES = ("wallpaper_a.png", "wallpaper_b.png")

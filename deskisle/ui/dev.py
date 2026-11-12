@@ -1,6 +1,6 @@
 """「測試」頁:只在以原始碼執行時出現。
 
-打包時這個模組會被排除(見 build.py),而且 gui.py 在打包後的執行檔裡
+打包時這個模組會被排除(見 build.py),而且 ui/app.py 在打包後的執行檔裡
 也不會嘗試載入它,所以使用者拿到的程式沒有這一頁。
 
 這一頁的所有功能都不會改動桌布。
@@ -19,14 +19,15 @@ from pathlib import Path
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-from . import __version__, decor, system
-from .config import app_dir
-from .layout import DesktopIcon, DesktopLayout
-from .system import read_layout
-from .themes import THEMES
-from .watcher import render_layout
+from .. import __version__, system
+from ..config import app_dir
+from ..engine import decor
+from ..engine.layout import DesktopIcon, DesktopLayout
+from ..engine.themes import THEMES
+from ..system import read_layout
+from ..watcher import render_layout
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def add_test_page(app, notebook: ttk.Notebook) -> None:

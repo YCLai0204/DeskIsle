@@ -7,7 +7,7 @@
 """
 import sys
 
-from deskisle.gui import main
+from deskisle.ui.app import main
 
 if __name__ == "__main__":
     sys.exit(main())

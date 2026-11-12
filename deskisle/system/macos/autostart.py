@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from . import is_frozen
+from ... import is_frozen
 
 LABEL = "com.deskisle.app"
 

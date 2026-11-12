@@ -7,10 +7,10 @@ import unittest
 
 import numpy as np
 
-from deskisle import decor
-from deskisle.render import render
-from deskisle.terrain import fbm, shore_field
-from deskisle.themes import THEMES, get_theme
+from deskisle.engine import decor
+from deskisle.engine.render import render
+from deskisle.engine.terrain import fbm, shore_field
+from deskisle.engine.themes import THEMES, get_theme
 
 W, H = 640, 360
 PARAMS = dict(margin=46.0, blend=26.0, roughness=22.0, seed=7)

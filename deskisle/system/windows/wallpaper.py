@@ -13,8 +13,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from PIL import Image
 
 from . import screens as screen_api
-from .config import app_dir
-from .layout import Screen
+from ...config import app_dir
+from ...engine.layout import Screen
 from .winapi import user32
 
 SPI_SETDESKWALLPAPER = 0x0014

@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from . import screens as screen_api
 from . import winapi
-from .layout import DesktopIcon, DesktopLayout, IconDetectionError, Screen  # noqa: F401
+from ...engine.layout import DesktopIcon, DesktopLayout, IconDetectionError, Screen  # noqa: F401
 from .winapi import kernel32, user32
 
 LVM_FIRST = 0x1000

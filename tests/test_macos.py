@@ -13,8 +13,10 @@ from unittest import mock
 
 from PIL import Image
 
-from deskisle import autostart_mac, macos, wallpaper_mac
-from deskisle.layout import IconDetectionError, Screen
+from deskisle.system.macos import autostart as autostart_mac
+from deskisle.system.macos import desktop as macos
+from deskisle.system.macos import wallpaper as wallpaper_mac
+from deskisle.engine.layout import IconDetectionError, Screen
 
 # 主螢幕 1440×900(Retina),左邊一個直向 1080×1920 的螢幕,上緣對齊
 SCREENS_OUTPUT = json.dumps([

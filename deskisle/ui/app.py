@@ -1,7 +1,7 @@
 """設定介面(tkinter)。
 
 - 「外觀」「運作」兩頁可以調整大部分設定,右邊是即時預覽。
-- 以原始碼執行時多一頁「測試」(見 gui_dev.py);打包後的執行檔沒有這一頁。
+- 以原始碼執行時多一頁「測試」(見 ui/dev.py);打包後的執行檔沒有這一頁。
 - 關閉視窗時縮到系統匣,監看繼續在背景執行。
 
 省資源:介面本身不做任何輪詢。預覽只在視窗看得見、而且設定有變時才重畫
@@ -25,13 +25,14 @@ from typing import Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import APP_NAME, __version__, is_frozen, system, tray
-from . import ui_style
-from .config import Config, app_dir, load_config, save_config
-from .system import autostart, read_layout, wallpaper
-from .layout import DesktopLayout, Screen
-from .themes import THEMES, get_theme
-from .watcher import Watcher, WatchStatus, apply_layout, look_key, render_screen
+from .. import APP_NAME, __version__, is_frozen, system
+from . import style as ui_style
+from . import tray
+from ..config import Config, app_dir, load_config, save_config
+from ..system import autostart, read_layout, wallpaper
+from ..engine.layout import DesktopLayout, Screen
+from ..engine.themes import THEMES, get_theme
+from ..watcher import Watcher, WatchStatus, apply_layout, look_key, render_screen
 
 INSTANCE_NAME = "DeskIsle.Instance"
 SHOW_SIGNAL = "DeskIsle.Show"
@@ -201,7 +202,7 @@ class App:
         if not is_frozen():
             # 測試頁只存在於原始碼版本;打包時這個模組會被排除
             try:
-                from . import gui_dev
+                from . import dev as gui_dev
                 gui_dev.add_test_page(self, self.notebook)
                 self.has_test_page = True
             except ImportError:

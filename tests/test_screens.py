@@ -17,7 +17,7 @@ from unittest import mock
 from PIL import Image
 
 from deskisle.config import Config, load_config, save_config
-from deskisle.layout import DesktopIcon, DesktopLayout, Screen, screen_rects
+from deskisle.engine.layout import DesktopIcon, DesktopLayout, Screen, screen_rects
 
 WINDOWS = sys.platform == "win32"
 
@@ -136,7 +136,7 @@ class RenderScreensTests(unittest.TestCase):
         self.assertEqual(seen, [((440, 220), 2)])
 
     def test_preview_marks_skipped_screens(self):
-        from deskisle import gui
+        from deskisle.ui import app as gui
         data = gui.render_preview(LAYOUT, Config(decorations=0, screens=("monitor-left",)), 220)
         image = Image.open(io.BytesIO(data)).convert("RGB")
         self.assertEqual(image.size, (220, 110))
@@ -149,7 +149,7 @@ class RenderScreensTests(unittest.TestCase):
 class ScreenCheckboxTests(unittest.TestCase):
     def setUp(self):
         import tkinter as tk
-        from deskisle import gui
+        from deskisle.ui import app as gui
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         env = mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp.name})
@@ -214,7 +214,7 @@ class _FakeDesktop:
 @unittest.skipUnless(WINDOWS, "需要 Windows")
 class PerScreenWallpaperTests(unittest.TestCase):
     def setUp(self):
-        from deskisle import wallpaper
+        from deskisle.system.windows import wallpaper
         self.wp = wallpaper
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

@@ -17,12 +17,13 @@ from typing import Callable, Optional
 
 from PIL import Image
 
-from . import decor, system
+from . import system
 from .config import Config
-from .layout import DesktopLayout, IconDetectionError, screen_rects
+from .engine import decor
+from .engine.layout import DesktopLayout, IconDetectionError, screen_rects
 from .system import read_layout, wallpaper
-from .render import render
-from .themes import get_theme
+from .engine.render import render
+from .engine.themes import get_theme
 
 GAP_COLOR = (0, 0, 0)   # 多螢幕合成圖中,沒有螢幕的空隙
 

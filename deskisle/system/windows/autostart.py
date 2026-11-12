@@ -8,7 +8,7 @@ import sys
 import winreg
 from pathlib import Path
 
-from . import APP_NAME, is_frozen
+from ... import APP_NAME, is_frozen
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = APP_NAME

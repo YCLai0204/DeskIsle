@@ -1,7 +1,7 @@
 """依作業系統選擇實作:其他模組只透過這裡呼叫系統功能。
 
-    Windows → winapi.py、icons.py、screens.py、wallpaper.py、autostart.py
-    macOS   → macos.py、wallpaper_mac.py、autostart_mac.py
+    Windows → windows/(winapi、icons、screens、wallpaper、autostart)
+    macOS   → macos/(desktop、wallpaper、autostart)
 
 對外提供的東西兩邊都一樣:
 
@@ -21,15 +21,15 @@ from __future__ import annotations
 
 import sys
 
-from .layout import IconDetectionError, Screen  # noqa: F401
+from ..engine.layout import IconDetectionError, Screen  # noqa: F401
 
 SUPPORTED = sys.platform in ("win32", "darwin")
 
 if sys.platform == "win32":
-    from . import autostart, wallpaper  # noqa: F401
-    from . import screens as _screens
-    from .icons import read_layout  # noqa: F401
-    from .winapi import (  # noqa: F401
+    from .windows import autostart, wallpaper  # noqa: F401
+    from .windows import screens as _screens
+    from .windows.icons import read_layout  # noqa: F401
+    from .windows.winapi import (  # noqa: F401
         acquire_single_instance, create_signal, desktop_is_foreground, enable_dpi_awareness,
         lower_thread_priority, monitor_count, send_signal, trim_memory, ui_scale, user_is_busy,
         virtual_screen, wait_signal,
@@ -40,9 +40,8 @@ if sys.platform == "win32":
         return _screens.list_screens(vx, vy)
 
 elif sys.platform == "darwin":
-    from . import autostart_mac as autostart  # noqa: F401
-    from . import wallpaper_mac as wallpaper  # noqa: F401
-    from .macos import (  # noqa: F401
+    from .macos import autostart, wallpaper  # noqa: F401
+    from .macos.desktop import (  # noqa: F401
         acquire_single_instance, create_signal, desktop_is_foreground, enable_dpi_awareness,
         list_screens, lower_thread_priority, monitor_count, read_layout, send_signal, trim_memory,
         ui_scale, user_is_busy, virtual_screen, wait_signal,

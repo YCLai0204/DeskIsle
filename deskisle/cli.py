@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from . import APP_NAME, __version__
 from .config import Config, config_path, load_config, save_config
-from .themes import THEMES
+from .engine.themes import THEMES
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -61,7 +61,7 @@ def _load(args) -> Config:
 
 
 def _cmd_gui(args) -> int:
-    from .gui import main as gui_main
+    from .ui.app import main as gui_main
     return gui_main(["--minimized"] if getattr(args, "minimized", False) else [])
 
 
@@ -179,7 +179,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as exc:  # 使用者看到的是一行訊息,不是堆疊追蹤
-        from .layout import IconDetectionError
+        from .engine.layout import IconDetectionError
         if isinstance(exc, (IconDetectionError, ValueError, OSError)):
             print(f"錯誤:{exc}", file=sys.stderr)
             return 1

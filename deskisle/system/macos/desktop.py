@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .layout import DesktopIcon, DesktopLayout, IconDetectionError, Screen
+from ...engine.layout import DesktopIcon, DesktopLayout, IconDetectionError, Screen
 
 REFRESH_SECONDS = 10.0     # 桌面沒有變動時,多久保險重讀一次圖示位置
 SCREEN_SECONDS = 15.0      # 多久重新查詢一次螢幕清單

@@ -6,7 +6,7 @@ DeskIsle 會讀取 Windows 桌面上每個圖示的位置,畫出一張跟著檔�
 有檔案的地方是沙灘,沒有檔案的地方是海洋,再點綴上椰子樹、珊瑚、魚群和小船。
 把檔案拖到別處,陸地就跟著移動。
 
-完整的設計說明在 [PLAN.md](PLAN.md)。
+完整的設計說明在 [PLAN.md](docs/PLAN.md)。
 
 ## 直接使用(不需要安裝任何東西)
 
@@ -47,7 +47,7 @@ exe 沒有簽章,在別台電腦第一次執行時 Windows 可能會跳出 Smart
 - 圖示排列改變時重畫一次:約 0.45 秒
 - 全螢幕程式(遊戲、影片)執行或螢幕鎖定時自動暫停
 
-想更省電,可以在「運作」頁把檢查間隔調長。做法細節見 [PLAN.md](PLAN.md) 第 9 節。
+想更省電,可以在「運作」頁把檢查間隔調長。做法細節見 [PLAN.md](docs/PLAN.md) 第 9 節。
 
 ## 還原桌布
 
@@ -105,6 +105,19 @@ python -m deskisle config --theme cosmos --save     把主題存成預設
 `preview`、`apply`、`watch` 都可以加 `--theme 主題`、`--seed 數字`(換一種海岸線形狀)、
 `--decorations 數量`(0 = 不放裝飾物)。`preview --debug` 會畫出圖示外框。
 
+### 專案結構
+
+```
+deskisle_app.py   視窗程式進入點          build.py   打包腳本
+deskisle/
+  engine/         畫桌布的核心(地形、主題、裝飾物),與作業系統無關
+  system/         作業系統相關:windows/、macos/,由 system/__init__.py 依系統選擇
+  ui/             設定視窗、系統匣、測試頁
+  config.py       設定檔          watcher.py   監看器          cli.py   命令列
+tests/            自動化測試
+docs/PLAN.md      完整設計說明
+```
+
 ### 測試頁
 
 以原始碼執行時,設定介面會多一頁「測試」:在預覽上畫圖示外框、用隨機假圖示測試排列、
@@ -135,7 +148,7 @@ dist\DeskIsle.exe --selftest 結果.json     不開視窗、不動桌布的自�
 
 ## 設定檔
 
-`%LOCALAPPDATA%\DeskIsle\config.json`(macOS:`~/Library/Application Support/DeskIsle/config.json`),介面會自動寫入。各項目的說明見 [PLAN.md](PLAN.md) 第 12 節。
+`%LOCALAPPDATA%\DeskIsle\config.json`(macOS:`~/Library/Application Support/DeskIsle/config.json`),介面會自動寫入。各項目的說明見 [PLAN.md](docs/PLAN.md) 第 12 節。
 
 ## 已知限制
 
@@ -146,4 +159,4 @@ dist\DeskIsle.exe --selftest 結果.json     不開視窗、不動桌布的自�
 - 極地主題的雪地顏色偏淺,圖示的白色文字比較不明顯。
 - exe 尚未在其他電腦上測試過。
 - macOS 版尚未在實機上測試過(見上面的「macOS」一節)。
-- 目前的驗證狀態見 [PLAN.md](PLAN.md) 第 13 節。
+- 目前的驗證狀態見 [PLAN.md](docs/PLAN.md) 第 13 節。

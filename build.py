@@ -11,7 +11,7 @@
 dist 裡已經有 DeskIsle.exe(例如舊版正在執行、檔案被鎖住)時不會覆蓋,
 而是另存為 DeskIsle_2.exe、DeskIsle_3.exe…(Mac 為 DeskIsle_2.app…)。
 
-打包時會排除「測試」頁(deskisle.gui_dev)。
+打包時會排除「測試」頁(deskisle.ui.dev),以及另一個作業系統的程式。
 """
 import plistlib
 import shutil
@@ -26,7 +26,7 @@ STAGING = BUILD / "staging"    # 先打包到這裡,完成後再搬到 dist(不�
 
 # 用不到、但環境裡如果裝了可能被順便帶進去的大型套件
 EXCLUDES = [
-    "deskisle.gui_dev",            # 測試頁:不給使用者
+    "deskisle.ui.dev",             # 測試頁:不給使用者
     "deskisle.cli",                # 命令列介面:exe 沒有主控台
     "matplotlib", "scipy", "pandas", "IPython", "pytest", "setuptools", "pkg_resources",
     "PIL.ImageQt", "PIL.ImageTk", "PyQt5", "PyQt6", "PySide2", "PySide6",
@@ -43,7 +43,7 @@ def main() -> int:
         return 1
 
     sys.path.insert(0, str(ROOT))
-    from deskisle.tray import make_icon
+    from deskisle.ui.tray import make_icon
 
     BUILD.mkdir(exist_ok=True)
     mac = sys.platform == "darwin"
@@ -69,7 +69,9 @@ def main() -> int:
         command += ["--onedir", "--osx-bundle-identifier", "com.deskisle.app", "--exclude-module", "pystray"]
     else:
         command += ["--onefile", "--hidden-import", "pystray._win32"]
-    for name in EXCLUDES:
+    # 另一個作業系統的實作用不到(system/__init__.py 只會載入目前系統的那一份)
+    other = "deskisle.system.windows" if mac else "deskisle.system.macos"
+    for name in EXCLUDES + [other]:
         command += ["--exclude-module", name]
     command.append(str(ROOT / "deskisle_app.py"))
 

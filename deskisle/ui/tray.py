@@ -11,7 +11,8 @@ from typing import Callable
 
 from PIL import Image, ImageDraw
 
-from . import APP_NAME, decor
+from .. import APP_NAME
+from ..engine import decor
 
 _RES = getattr(Image, "Resampling", Image)
 
