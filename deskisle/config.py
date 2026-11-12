@@ -24,6 +24,7 @@ class Config:
     idle_interval: float = 3.0  # 其他時候每幾秒檢查一次
     debounce: float = 0.5      # 排列穩定多久後才重畫(秒)
     pause_when_busy: bool = True  # 全螢幕程式執行或螢幕鎖定時暫停
+    reseed_on_move: bool = True   # 跟隨時,圖示排列一改變就換一個種子(每次的海岸線都不同)
 
     def validate(self) -> "Config":
         get_theme(self.theme)

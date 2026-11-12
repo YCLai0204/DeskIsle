@@ -9,9 +9,10 @@
 """
 from __future__ import annotations
 
+import random
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
 from . import decor, wallpaper, winapi
@@ -33,6 +34,14 @@ def render_layout(layout: DesktopLayout, config: Config, debug: bool = False):
 def apply_layout(layout: DesktopLayout, config: Config):
     """畫圖並設為桌布;回傳桌布檔案路徑。"""
     return wallpaper.apply_image(render_layout(layout, config), layout.monitors)
+
+
+def new_seed(old: int) -> int:
+    """換一個跟原本不一樣的種子。"""
+    while True:
+        seed = random.randrange(0, 100000)
+        if seed != old:
+            return seed
 
 
 def look_key(config: Config) -> tuple:
@@ -85,12 +94,20 @@ class WatchStatus:
 
 
 class Watcher:
-    """可以啟動、停止的監看器。run() 是阻塞版本;start() 會開一個背景執行緒。"""
+    """可以啟動、停止的監看器。run() 是阻塞版本;start() 會開一個背景執行緒。
+
+    設定 reseed_on_move 開啟時,圖示排列一改變就換一個種子再重畫,
+    並呼叫 on_reseed(新種子)。on_reseed 必須「立刻」讓 get_config() 回傳新的種子,
+    否則下一輪會把它當成外觀被改回去而又重畫一次。
+    """
 
     def __init__(self, get_config: Callable[[], Config],
-                 on_status: Optional[Callable[[WatchStatus], None]] = None):
+                 on_status: Optional[Callable[[WatchStatus], None]] = None,
+                 on_reseed: Optional[Callable[[int], None]] = None):
         self._get_config = get_config
         self._on_status = on_status
+        self._on_reseed = on_reseed
+        self._last_layout = None   # 上次畫桌布時的圖示排列
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._force = False
@@ -171,9 +188,16 @@ class Watcher:
             self._report(state="error", message=str(exc))
             return slow, 0
 
-        signature = (layout.signature(), look_key(config))
+        layout_key = layout.signature()
+        signature = (layout_key, look_key(config))
         force, self._force = self._force, False
         if force or debouncer.should_apply(signature, time.monotonic()):
+            # 是圖示移動造成的重畫(不是第一次、也不是外觀設定改了)→ 換一個種子
+            moved = (config.reseed_on_move and not force and self._last_layout is not None
+                     and layout_key != self._last_layout)
+            if moved:
+                config = replace(config, seed=new_seed(config.seed))
+                signature = (layout_key, look_key(config))
             started = time.perf_counter()
             try:
                 apply_layout(layout, config)
@@ -184,6 +208,9 @@ class Watcher:
                 decor.clear_cache()
                 winapi.trim_memory()
             debouncer.mark_applied(signature)
+            self._last_layout = layout_key
+            if moved and self._on_reseed is not None:
+                self._on_reseed(config.seed)
             self._report(
                 state="following", icons=len(layout.icons),
                 message="" if layout.icons_visible else "桌面圖示已隱藏",
@@ -217,7 +244,12 @@ def watch(config: Config, log: Callable[[str], None] = print,
                 log("已恢復監看")
             last["state"] = status.state
 
-    watcher = Watcher(lambda: config, on_status)
+    box = [config]
+
+    def on_reseed(seed: int) -> None:
+        box[0] = replace(box[0], seed=seed)
+
+    watcher = Watcher(lambda: box[0], on_status, on_reseed)
     try:
         return watcher.run(max_updates)
     except KeyboardInterrupt:

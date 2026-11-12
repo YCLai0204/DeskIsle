@@ -88,7 +88,7 @@ class App:
         self._visible = False
         self._quitting = False
         self.tray: Optional[tray.Tray] = None
-        self.watcher = Watcher(lambda: self.applied, self._on_watch_status)
+        self.watcher = Watcher(lambda: self.applied, self._on_watch_status, self._on_reseed)
 
         root.title(f"{APP_NAME} 桌島")
         root.protocol("WM_DELETE_WINDOW", self.hide)
@@ -243,6 +243,7 @@ class App:
         self.var_follow = tk.BooleanVar()
         self.var_pause = tk.BooleanVar()
         self.var_autostart = tk.BooleanVar()
+        self.var_reseed = tk.BooleanVar()
         self.var_poll = tk.DoubleVar()
         self.var_idle = tk.DoubleVar()
         self.var_debounce = tk.DoubleVar()
@@ -250,25 +251,28 @@ class App:
         ttk.Checkbutton(page, text="自動跟隨桌面圖示(圖示移動後自動重畫桌布)",
                         variable=self.var_follow, command=self._follow_toggled).grid(
             row=0, column=0, columnspan=3, sticky="w")
+        ttk.Checkbutton(page, text="圖示移動後換一種海岸線形狀(每次都不一樣)",
+                        variable=self.var_reseed, command=self._behavior_changed).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Checkbutton(page, text="全螢幕程式執行或螢幕鎖定時暫停",
                         variable=self.var_pause, command=self._behavior_changed).grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Checkbutton(page, text="開機時自動啟動(縮在系統匣)",
                         variable=self.var_autostart, command=self._autostart_toggled).grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
-        ttk.Separator(page).grid(row=3, column=0, columnspan=3, sticky="ew", pady=12)
-        self._slider(page, 4, "檢查間隔", self.var_poll, 0.5, 5, "{:.1f} 秒", self._behavior_changed,
+        ttk.Separator(page).grid(row=4, column=0, columnspan=3, sticky="ew", pady=12)
+        self._slider(page, 5, "檢查間隔", self.var_poll, 0.5, 5, "{:.1f} 秒", self._behavior_changed,
                      "你正對著桌面時,多久檢查一次圖示位置")
-        self._slider(page, 6, "背景檢查間隔", self.var_idle, 1, 30, "{:.0f} 秒", self._behavior_changed,
+        self._slider(page, 7, "背景檢查間隔", self.var_idle, 1, 30, "{:.0f} 秒", self._behavior_changed,
                      "你在用其他視窗時,多久檢查一次")
-        self._slider(page, 8, "穩定等待", self.var_debounce, 0.2, 3, "{:.1f} 秒", self._behavior_changed,
+        self._slider(page, 9, "穩定等待", self.var_debounce, 0.2, 3, "{:.1f} 秒", self._behavior_changed,
                      "圖示停止移動多久後才重畫")
         ttk.Label(
             page, foreground="#666666", wraplength=330, justify="left",
             text="間隔越長越省電。桌布是靜態圖片,平常不使用顯示卡;"
                  "只有圖示排列改變時才會花約半秒重畫一次。",
-        ).grid(row=10, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ).grid(row=11, column=0, columnspan=3, sticky="w", pady=(14, 0))
 
     # ---------------------------------------------------------------- 設定值
     def _load_controls(self, config: Config) -> None:
@@ -282,6 +286,7 @@ class App:
         self.var_decor.set(config.decorations)
         self.var_follow.set(config.follow)
         self.var_pause.set(config.pause_when_busy)
+        self.var_reseed.set(config.reseed_on_move)
         self.var_poll.set(config.poll_interval)
         self.var_idle.set(config.idle_interval)
         self.var_debounce.set(config.debounce)
@@ -319,6 +324,7 @@ class App:
             idle_interval=float(round(self.var_idle.get())),
             debounce=round(self.var_debounce.get(), 1),
             pause_when_busy=bool(self.var_pause.get()),
+            reseed_on_move=bool(self.var_reseed.get()),
         ).validate()
 
     def _save(self) -> None:
@@ -355,7 +361,7 @@ class App:
         self.applied = replace(
             self.applied, follow=draft.follow, poll_interval=draft.poll_interval,
             idle_interval=draft.idle_interval, debounce=draft.debounce,
-            pause_when_busy=draft.pause_when_busy,
+            pause_when_busy=draft.pause_when_busy, reseed_on_move=draft.reseed_on_move,
         )
         self._save()
 
@@ -502,6 +508,19 @@ class App:
 
     def _on_watch_status(self, status: WatchStatus) -> None:
         self._ui(self._show_watch_status, status)
+
+    def _on_reseed(self, seed: int) -> None:
+        """監看器因為圖示移動換了種子(在監看執行緒呼叫)。"""
+        old = self.applied.seed
+        self.applied = replace(self.applied, seed=seed)   # 立刻生效,下一輪監看就讀得到
+        self._ui(self._show_reseed, old, seed)
+
+    def _show_reseed(self, old: int, seed: int) -> None:
+        # 使用者沒有正在改種子的話,介面上的種子也跟著換,預覽才會跟桌布一樣
+        if self._seed_value() == old:
+            self.var_seed.set(seed)
+            self._look_changed()
+        self._save()
 
     def _show_watch_status(self, status: WatchStatus) -> None:
         parts = [STATE_TEXT.get(status.state, status.state)]

@@ -181,6 +181,54 @@ class WatchLoopTests(unittest.TestCase):
         self.assertFalse(w.running)
         self.assertEqual(w.status.state, "stopped")
 
+    def _run_reseed(self, reseed_on_move):
+        """排列 a → a → b → b:回傳每次套用時用的種子與 on_reseed 收到的種子。"""
+        from dataclasses import replace
+        from deskisle import watcher
+        from deskisle.icons import DesktopIcon, DesktopLayout
+
+        a = DesktopLayout(320, 200, (DesktopIcon("a", 0, 0, 76, 70),))
+        b = DesktopLayout(320, 200, (DesktopIcon("a", 200, 100, 276, 170),))
+        script = [a, a, b, b, b, b]
+        box = [Config(poll_interval=0.1, idle_interval=0.1, debounce=0.0, pause_when_busy=False,
+                      reseed_on_move=reseed_on_move)]
+        seeds, reported = [], []
+
+        def on_reseed(seed):
+            reported.append(seed)
+            box[0] = replace(box[0], seed=seed)
+
+        def fake_apply(layout, config):
+            seeds.append(config.seed)
+            return Path("fake.png")
+
+        w = watcher.Watcher(lambda: box[0], None, on_reseed)
+
+        def fake_read(names=True):
+            if not script:
+                w.stop(wait=False)   # 腳本讀完就結束
+                return b
+            return script.pop(0)
+
+        with mock.patch.object(watcher, "read_layout", fake_read), \
+                mock.patch.object(watcher, "apply_layout", fake_apply):
+            w.run()
+        return seeds, reported, script
+
+    def test_moving_icons_picks_a_new_seed_once(self):
+        seeds, reported, script = self._run_reseed(True)
+        self.assertEqual(seeds[0], Config().seed)          # 第一次用設定裡的種子
+        self.assertNotEqual(seeds[1], seeds[0])            # 圖示移動 → 換種子
+        self.assertEqual(reported, [seeds[1]])
+        # 換完種子後排列沒再變,就不該再重畫
+        self.assertEqual(len(seeds), 2)
+        self.assertEqual(script, [])
+
+    def test_reseed_can_be_turned_off(self):
+        seeds, reported, _ = self._run_reseed(False)
+        self.assertEqual(seeds, [Config().seed, Config().seed])
+        self.assertEqual(reported, [])
+
     def test_nothing_is_read_or_drawn_while_a_fullscreen_app_is_running(self):
         from deskisle.icons import DesktopIcon, DesktopLayout
 
@@ -287,6 +335,21 @@ class GuiTests(unittest.TestCase):
         app._behavior_changed()
         self.assertEqual(app.applied.theme, "beach")
         self.assertFalse(app.applied.pause_when_busy)
+
+    def test_reseed_from_watcher_updates_applied_config_and_seed_box(self):
+        app, root = self._make_app()
+        app._on_reseed(4321)
+        self.assertEqual(app.applied.seed, 4321)      # 監看執行緒立刻讀得到
+        root.update()
+        self.assertEqual(app.var_seed.get(), 4321)    # 介面上的種子跟著換
+
+    def test_reseed_does_not_overwrite_a_seed_the_user_is_editing(self):
+        app, root = self._make_app()
+        app.var_seed.set(55)                          # 使用者正在試別的種子,還沒套用
+        app._on_reseed(4321)
+        root.update()
+        self.assertEqual(app.var_seed.get(), 55)
+        self.assertEqual(app.applied.seed, 4321)
 
     def test_headless_app_writes_nothing(self):
         app, _ = self._make_app()
