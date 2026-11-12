@@ -1,0 +1,6 @@
+numpy>=1.21
+Pillow>=9.1
+pystray>=0.19    # 系統匣圖示;沒有也能執行(改為縮到工作列)
+
+# 只有打包成 exe 時需要:
+#   pip install pyinstaller

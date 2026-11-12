@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+previews/
+deskisle_preview.png
+build/
+dist/
+.claude/
